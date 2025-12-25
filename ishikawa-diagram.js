@@ -48,7 +48,7 @@ class IshikawaDiagram {
 
       // 大骨設定
       majorBone: {
-        length: 600,
+        length: 800,
         angle: 60, // 度
         strokeWidth: 3,
         color: '#34495e',
