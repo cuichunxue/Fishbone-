@@ -30,7 +30,7 @@ class IshikawaDiagram {
       // 背骨（主骨）設定
       spine: {
         startX: 100,
-        endX: 1500,
+        endX: 1550,
         y: 500,
         strokeWidth: 4,
         color: '#2c3e50'
@@ -267,9 +267,9 @@ class IshikawaDiagram {
     );
     this.mainGroup.appendChild(boneLine);
 
-    // 矢印（始点=背骨上に配置）
+    // 矢印（終点=外側に配置、線の進行方向に沿う）
     const arrowAngle = pos.isTop ? -angle : angle;
-    const arrow = this.createArrowhead(pos.spineX, pos.spineY, arrowAngle + 180, 10, color);
+    const arrow = this.createArrowhead(endX, endY, arrowAngle, 10, color);
     this.mainGroup.appendChild(arrow);
 
     // カテゴリーボックス
@@ -393,21 +393,18 @@ class IshikawaDiagram {
       const direction = subcauseIsTop ? -1 : 1;  // 上なら-1、下なら+1
 
       // 小骨の始点座標を計算（外側から中骨へ60度）
-      const dx = causeIsRight ? length * Math.cos(rad) : -length * Math.cos(rad);
-      const startX = endX + dx;
+      const offsetX = causeIsRight ? length * Math.cos(rad) : -length * Math.cos(rad);
+      const startX = endX + offsetX;
       const startY = endY + direction * length * Math.sin(rad);
 
       // 小骨の線
       const subcauseLine = this.createLine(startX, startY, endX, endY, strokeWidth, color);
       this.mainGroup.appendChild(subcauseLine);
 
-      // 矢印（終点=中骨上に配置）
-      let arrowAngle;
-      if (causeIsRight) {
-        arrowAngle = subcauseIsTop ? 180 + angle : 180 - angle;
-      } else {
-        arrowAngle = subcauseIsTop ? -angle : angle;
-      }
+      // 矢印（終点=中骨上に配置、線の進行方向に沿う）
+      const arrowDx = endX - startX;
+      const arrowDy = endY - startY;
+      const arrowAngle = Math.atan2(arrowDy, arrowDx) * 180 / Math.PI;
       const arrow = this.createArrowhead(endX, endY, arrowAngle, 6, color);
       this.mainGroup.appendChild(arrow);
 
