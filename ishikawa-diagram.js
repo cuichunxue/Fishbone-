@@ -474,19 +474,20 @@ class IshikawaDiagram {
       const arrow = this.createArrowhead(endX, endY, arrowAngle, 5, color);
       this.mainGroup.appendChild(arrow);
 
-      // ラベル（始点=外側にテキストのみ）
+      // ラベル（始点=外側にテキストのみ、長い場合は2行）
       const labelGroup = this.createGroup();
       const labelXOffset = 0;
       const labelYOffset = detailIsTop ? -5 : 15;
 
-      const labelText = this.createText(
+      const labelText = this.createMultilineText(
         startX + labelXOffset,
         startY + labelYOffset,
         detail,
         fontSize,
         'normal',
         '#7f8c8d',
-        'middle'
+        'middle',
+        8  // 最大8文字で改行
       );
       labelGroup.appendChild(labelText);
 
@@ -548,6 +549,44 @@ class IshikawaDiagram {
     textEl.setAttribute('text-anchor', textAnchor);
     textEl.setAttribute('dominant-baseline', 'middle');
     textEl.textContent = text;
+    return textEl;
+  }
+
+  /**
+   * 複数行テキストを作成
+   */
+  createMultilineText(x, y, text, fontSize, fontWeight, fill, textAnchor, maxChars = 8) {
+    const textEl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    textEl.setAttribute('x', x);
+    textEl.setAttribute('y', y);
+    textEl.setAttribute('font-size', fontSize);
+    textEl.setAttribute('font-weight', fontWeight);
+    textEl.setAttribute('fill', fill);
+    textEl.setAttribute('text-anchor', textAnchor);
+
+    // テキストが短い場合は1行
+    if (text.length <= maxChars) {
+      textEl.setAttribute('dominant-baseline', 'middle');
+      textEl.textContent = text;
+    } else {
+      // テキストが長い場合は2行に分割
+      const line1 = text.substring(0, maxChars);
+      const line2 = text.substring(maxChars);
+
+      const tspan1 = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
+      tspan1.setAttribute('x', x);
+      tspan1.setAttribute('dy', -fontSize * 0.5);
+      tspan1.textContent = line1;
+
+      const tspan2 = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
+      tspan2.setAttribute('x', x);
+      tspan2.setAttribute('dy', fontSize);
+      tspan2.textContent = line2;
+
+      textEl.appendChild(tspan1);
+      textEl.appendChild(tspan2);
+    }
+
     return textEl;
   }
 
