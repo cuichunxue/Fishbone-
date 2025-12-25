@@ -17,6 +17,10 @@ class IshikawaDiagram {
     this.panStart = { x: 0, y: 0 };
     this.zoomLevel = 1;
 
+    // タッチ操作用
+    this.touches = [];
+    this.lastTouchDistance = 0;
+
     // 描画設定
     this.config = {
       width: 1400,
@@ -101,6 +105,7 @@ class IshikawaDiagram {
     this.svg.style.border = '1px solid #ddd';
     this.svg.style.backgroundColor = '#ffffff';
     this.svg.style.cursor = 'grab';
+    this.svg.style.touchAction = 'none'; // タッチ操作を完全制御
 
     // メインコンテンツグループ
     this.mainGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -595,6 +600,11 @@ class IshikawaDiagram {
 
     // リセットボタン（ダブルクリック）
     this.svg.addEventListener('dblclick', this.resetView.bind(this));
+
+    // タッチイベント（モバイル対応）
+    this.svg.addEventListener('touchstart', this.onTouchStart.bind(this), { passive: false });
+    this.svg.addEventListener('touchmove', this.onTouchMove.bind(this), { passive: false });
+    this.svg.addEventListener('touchend', this.onTouchEnd.bind(this), { passive: false });
   }
 
   /**
@@ -736,6 +746,144 @@ class IshikawaDiagram {
       x: (e.clientX - CTM.e) / CTM.a,
       y: (e.clientY - CTM.f) / CTM.d
     };
+  }
+
+  // ========== タッチイベント（モバイル対応） ==========
+
+  /**
+   * タッチ開始イベント
+   */
+  onTouchStart(e) {
+    e.preventDefault();
+    this.touches = Array.from(e.touches);
+
+    if (this.touches.length === 1) {
+      // 1本指タッチ：ドラッグまたはパン
+      const touch = this.touches[0];
+      const target = document.elementFromPoint(touch.clientX, touch.clientY);
+      let group = target;
+
+      // 親グループを探す
+      while (group && group.tagName !== 'g') {
+        group = group.parentElement;
+      }
+
+      if (group && group.getAttribute('data-draggable') === 'true') {
+        // ラベルのドラッグ
+        this.draggingElement = group;
+        const pt = this.getTouchPosition(touch);
+        const matrix = group.getCTM();
+        this.offset = {
+          x: pt.x - matrix.e,
+          y: pt.y - matrix.f
+        };
+        group.style.opacity = '0.7';
+      } else {
+        // パン
+        this.isPanning = true;
+        this.panStart = this.getTouchPosition(touch);
+      }
+    } else if (this.touches.length === 2) {
+      // 2本指タッチ：ピンチズーム
+      this.isPanning = false;
+      this.draggingElement = null;
+      this.lastTouchDistance = this.getTouchDistance(this.touches[0], this.touches[1]);
+    }
+  }
+
+  /**
+   * タッチ移動イベント
+   */
+  onTouchMove(e) {
+    e.preventDefault();
+    this.touches = Array.from(e.touches);
+
+    if (this.touches.length === 1) {
+      const touch = this.touches[0];
+
+      if (this.draggingElement) {
+        // ラベルのドラッグ
+        const pt = this.getTouchPosition(touch);
+        const x = pt.x - this.offset.x;
+        const y = pt.y - this.offset.y;
+        this.draggingElement.setAttribute('transform', `translate(${x}, ${y})`);
+      } else if (this.isPanning) {
+        // パン
+        const pt = this.getTouchPosition(touch);
+        const dx = pt.x - this.panStart.x;
+        const dy = pt.y - this.panStart.y;
+
+        this.viewBox.x -= dx;
+        this.viewBox.y -= dy;
+        this.updateViewBox();
+
+        this.panStart = this.getTouchPosition(touch);
+      }
+    } else if (this.touches.length === 2) {
+      // ピンチズーム
+      const currentDistance = this.getTouchDistance(this.touches[0], this.touches[1]);
+      const delta = currentDistance / this.lastTouchDistance;
+
+      const centerX = (this.touches[0].clientX + this.touches[1].clientX) / 2;
+      const centerY = (this.touches[0].clientY + this.touches[1].clientY) / 2;
+      const CTM = this.svg.getScreenCTM();
+      const centerPt = {
+        x: (centerX - CTM.e) / CTM.a,
+        y: (centerY - CTM.f) / CTM.d
+      };
+
+      const newWidth = this.viewBox.width / delta;
+      const newHeight = this.viewBox.height / delta;
+
+      const dx = (newWidth - this.viewBox.width) * ((centerPt.x - this.viewBox.x) / this.viewBox.width);
+      const dy = (newHeight - this.viewBox.height) * ((centerPt.y - this.viewBox.y) / this.viewBox.height);
+
+      this.viewBox.x -= dx;
+      this.viewBox.y -= dy;
+      this.viewBox.width = newWidth;
+      this.viewBox.height = newHeight;
+
+      this.zoomLevel /= delta;
+      this.updateViewBox();
+
+      this.lastTouchDistance = currentDistance;
+    }
+  }
+
+  /**
+   * タッチ終了イベント
+   */
+  onTouchEnd(e) {
+    e.preventDefault();
+
+    if (this.draggingElement) {
+      this.draggingElement.style.opacity = '1';
+      this.draggingElement = null;
+    }
+
+    this.isPanning = false;
+    this.touches = [];
+    this.lastTouchDistance = 0;
+  }
+
+  /**
+   * タッチ位置を取得（SVG座標系）
+   */
+  getTouchPosition(touch) {
+    const CTM = this.svg.getScreenCTM();
+    return {
+      x: (touch.clientX - CTM.e) / CTM.a,
+      y: (touch.clientY - CTM.f) / CTM.d
+    };
+  }
+
+  /**
+   * 2点間の距離を取得
+   */
+  getTouchDistance(touch1, touch2) {
+    const dx = touch2.clientX - touch1.clientX;
+    const dy = touch2.clientY - touch1.clientY;
+    return Math.sqrt(dx * dx + dy * dy);
   }
 
   // ========== エクスポート機能 ==========

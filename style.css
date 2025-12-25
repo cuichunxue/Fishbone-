@@ -181,6 +181,11 @@ button {
 #diagramContainer svg {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   border-radius: 8px;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
 }
 
 /* 空の状態 */
@@ -274,12 +279,23 @@ button {
   .input-panel {
     border-right: none;
     border-bottom: 1px solid #dee2e6;
+    max-height: 50vh;
+    overflow-y: auto;
+  }
+
+  .display-panel {
+    min-height: 50vh;
   }
 }
 
 @media (max-width: 768px) {
+  /* ヘッダー */
   header h1 {
-    font-size: 24px;
+    font-size: 22px;
+  }
+
+  header p {
+    font-size: 13px;
   }
 
   .container {
@@ -288,6 +304,150 @@ button {
 
   body {
     padding: 0;
+  }
+
+  /* 入力パネル */
+  .input-panel {
+    padding: 20px 15px;
+  }
+
+  .input-panel h2 {
+    font-size: 18px;
+  }
+
+  #mermaidInput {
+    height: 300px;
+    font-size: 12px;
+  }
+
+  /* ボタン（タッチフレンドリー） */
+  button {
+    padding: 14px 20px;
+    font-size: 15px;
+    min-height: 48px; /* タッチターゲット推奨サイズ */
+  }
+
+  .button-group {
+    gap: 12px;
+  }
+
+  /* サンプルセクション */
+  .sample-section {
+    margin-top: 20px;
+  }
+
+  .sample-section h3 {
+    font-size: 15px;
+  }
+
+  .sample-section p {
+    font-size: 12px;
+  }
+
+  /* 表示パネル */
+  .display-panel {
+    padding: 15px;
+  }
+
+  #diagramContainer {
+    min-height: 400px;
+  }
+
+  /* エクスポートボタン */
+  .export-group {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .export-group button {
+    width: 100%;
+  }
+
+  /* 空の状態 */
+  .empty-state {
+    padding: 40px 15px;
+  }
+
+  .empty-state svg {
+    width: 80px;
+    height: 80px;
+  }
+
+  .empty-state h3 {
+    font-size: 16px;
+  }
+
+  .empty-state p {
+    font-size: 12px;
+  }
+}
+
+/* 超小型デバイス */
+@media (max-width: 480px) {
+  header h1 {
+    font-size: 18px;
+  }
+
+  header p {
+    font-size: 12px;
+  }
+
+  .input-panel {
+    padding: 15px 10px;
+  }
+
+  #mermaidInput {
+    height: 250px;
+    font-size: 11px;
+    padding: 10px;
+  }
+
+  button {
+    padding: 12px 16px;
+    font-size: 14px;
+  }
+
+  .sample-section h3 {
+    font-size: 14px;
+    margin-bottom: 8px;
+  }
+
+  .sample-section p {
+    font-size: 11px;
+  }
+
+  #diagramContainer {
+    min-height: 350px;
+  }
+}
+
+/* タッチデバイス最適化 */
+@media (hover: none) and (pointer: coarse) {
+  /* タッチデバイス用 */
+  button {
+    min-height: 48px;
+    cursor: default;
+  }
+
+  button:active {
+    transform: scale(0.98);
+  }
+
+  .svg {
+    touch-action: none; /* ブラウザのデフォルトタッチ動作を無効化 */
+  }
+}
+
+/* ランドスケープモード（横画面） */
+@media (max-width: 992px) and (orientation: landscape) {
+  .main-content {
+    grid-template-columns: 400px 1fr;
+  }
+
+  .input-panel {
+    max-height: 100vh;
+    border-right: 1px solid #dee2e6;
+    border-bottom: none;
   }
 }
 
