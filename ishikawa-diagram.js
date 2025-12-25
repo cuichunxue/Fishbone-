@@ -319,8 +319,8 @@ class IshikawaDiagram {
     const { length, strokeWidth, color, fontSize, spacing } = this.config.mediumBone;
 
     causes.forEach((cause, index) => {
-      // 中骨の終点を大骨上に配置（背骨側に寄せつつ干渉を防ぐ）
-      const t = 0.15 + index * 0.18; // 大骨上の位置（0.15, 0.33, 0.51, 0.69）
+      // 中骨の終点を大骨上に配置（背骨から適度に離して配置）
+      const t = 0.18 + index * 0.18; // 大骨上の位置（0.18, 0.36, 0.54, 0.72）
       const endX = spinePos.spineX - (spinePos.spineX - boneEndX) * t;
       const endY = isTop
         ? spinePos.spineY - (spinePos.spineY - boneEndY) * t
