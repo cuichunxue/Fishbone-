@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>石川ダイアグラム自動生成Webアプリ</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>石川ダイアグラム（特性要因図）自動生成</h1>
+      <p>Mermaidデータから正確で美しい特性要因図を生成 | ドラッグ&ドロップで編集可能</p>
+    </header>
+
+    <div class="main-content">
+      <!-- 左側パネル：入力エリア -->
+      <div class="input-panel">
+        <h2>Mermaidデータ入力</h2>
+
+        <div class="input-group">
+          <label for="mermaidInput">Mermaid形式で入力してください</label>
+          <textarea id="mermaidInput" placeholder="Mermaidデータをここに入力...">ishikawa
+  effect "不良率が高い"
+
+  category "機械"
+    cause "設備老朽化"
+      subcause "メンテナンス不足"
+        detail "点検頻度低い"
+        detail "予算不足"
+      subcause "部品摩耗"
+        detail "使用年数長い"
+    cause "温度管理不良"
+      subcause "センサー故障"
+      subcause "空調不備"
+    cause "振動異常"
+
+  category "人"
+    cause "技能不足"
+      subcause "研修不足"
+        detail "OJT不足"
+      subcause "経験浅い"
+    cause "疲労蓄積"
+      subcause "長時間労働"
+      subcause "休憩不足"
+    cause "コミュニケーション不足"
+
+  category "材料"
+    cause "品質バラツキ"
+      subcause "ロット管理不良"
+      subcause "検査基準甘い"
+    cause "保管環境不適切"
+      subcause "温度管理"
+        detail "冷蔵設備故障"
+      subcause "湿度管理"
+    cause "入荷検査不備"
+
+  category "方法"
+    cause "作業手順不明確"
+      subcause "マニュアル古い"
+      subcause "更新されていない"
+    cause "標準化不足"
+      subcause "各自の方法"
+        detail "統一性なし"
+    cause "チェック体制不十分"</textarea>
+        </div>
+
+        <div class="button-group">
+          <button class="btn-primary" onclick="generateDiagram()">
+            ダイアグラムを生成
+          </button>
+          <button class="btn-secondary" onclick="resetInput()">
+            リセット
+          </button>
+          <button class="btn-success" onclick="loadSample()">
+            サンプルを読み込み
+          </button>
+        </div>
+
+        <div class="sample-section">
+          <h3>使い方</h3>
+          <p>
+            1. 上のテキストエリアにMermaid形式のデータを入力<br>
+            2. 「ダイアグラムを生成」ボタンをクリック<br>
+            3. 生成された図のラベルはドラッグ&ドロップで移動可能<br>
+            4. PNG/SVG形式でエクスポート可能
+          </p>
+
+          <h3>データ形式</h3>
+          <p>
+            <strong>effect</strong>: 特性（問題）<br>
+            <strong>category</strong>: カテゴリー（4M: 機械、人、材料、方法）<br>
+            <strong>cause</strong>: 原因（中骨）<br>
+            <strong>subcause</strong>: 副原因（小骨）<br>
+            <strong>detail</strong>: 詳細（孫骨）
+          </p>
+        </div>
+      </div>
+
+      <!-- 右側パネル：ダイアグラム表示エリア -->
+      <div class="display-panel">
+        <div id="diagramContainer">
+          <div class="empty-state">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+              <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+              <line x1="12" y1="22.08" x2="12" y2="12"></line>
+            </svg>
+            <h3>ダイアグラムを生成してください</h3>
+            <p>左側のMermaidデータを入力して「生成」ボタンをクリック</p>
+          </div>
+        </div>
+
+        <div class="export-group" id="exportGroup" style="display: none;">
+          <button class="btn-success" onclick="exportAsPNG()">
+            PNG形式でダウンロード
+          </button>
+          <button class="btn-success" onclick="exportAsSVG()">
+            SVG形式でダウンロード
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="mermaid-parser.js"></script>
+  <script src="ishikawa-diagram.js"></script>
+  <script>
+    let diagram = null;
+    let parser = null;
+
+    // ページ読み込み時に初期化
+    window.addEventListener('DOMContentLoaded', () => {
+      parser = new MermaidParser();
+      diagram = new IshikawaDiagram('diagramContainer');
+    });
+
+    // ダイアグラムを生成
+    function generateDiagram() {
+      const mermaidText = document.getElementById('mermaidInput').value;
+
+      if (!mermaidText.trim()) {
+        alert('Mermaidデータを入力してください');
+        return;
+      }
+
+      try {
+        // パース
+        const data = parser.parse(mermaidText);
+
+        // 描画
+        diagram.render(data);
+
+        // エクスポートボタンを表示
+        document.getElementById('exportGroup').style.display = 'flex';
+
+        // アニメーション
+        const container = document.getElementById('diagramContainer');
+        container.classList.add('fade-in');
+        setTimeout(() => {
+          container.classList.remove('fade-in');
+        }, 500);
+
+      } catch (error) {
+        console.error('エラー:', error);
+        alert('ダイアグラムの生成に失敗しました。入力データを確認してください。');
+      }
+    }
+
+    // 入力をリセット
+    function resetInput() {
+      document.getElementById('mermaidInput').value = '';
+      document.getElementById('diagramContainer').innerHTML = `
+        <div class="empty-state">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+            <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+            <line x1="12" y1="22.08" x2="12" y2="12"></line>
+          </svg>
+          <h3>ダイアグラムを生成してください</h3>
+          <p>左側のMermaidデータを入力して「生成」ボタンをクリック</p>
+        </div>
+      `;
+      document.getElementById('exportGroup').style.display = 'none';
+      diagram = new IshikawaDiagram('diagramContainer');
+    }
+
+    // サンプルを読み込み
+    function loadSample() {
+      const sampleData = `ishikawa
+  effect "不良率が高い"
+
+  category "機械"
+    cause "設備老朽化"
+      subcause "メンテナンス不足"
+        detail "点検頻度低い"
+        detail "予算不足"
+      subcause "部品摩耗"
+        detail "使用年数長い"
+    cause "温度管理不良"
+      subcause "センサー故障"
+      subcause "空調不備"
+    cause "振動異常"
+
+  category "人"
+    cause "技能不足"
+      subcause "研修不足"
+        detail "OJT不足"
+      subcause "経験浅い"
+    cause "疲労蓄積"
+      subcause "長時間労働"
+      subcause "休憩不足"
+    cause "コミュニケーション不足"
+
+  category "材料"
+    cause "品質バラツキ"
+      subcause "ロット管理不良"
+      subcause "検査基準甘い"
+    cause "保管環境不適切"
+      subcause "温度管理"
+        detail "冷蔵設備故障"
+      subcause "湿度管理"
+    cause "入荷検査不備"
+
+  category "方法"
+    cause "作業手順不明確"
+      subcause "マニュアル古い"
+      subcause "更新されていない"
+    cause "標準化不足"
+      subcause "各自の方法"
+        detail "統一性なし"
+    cause "チェック体制不十分"`;
+
+      document.getElementById('mermaidInput').value = sampleData;
+    }
+
+    // PNGとしてエクスポート
+    function exportAsPNG() {
+      if (diagram && diagram.svg) {
+        diagram.exportAsPNG();
+      } else {
+        alert('ダイアグラムを先に生成してください');
+      }
+    }
+
+    // SVGとしてエクスポート
+    function exportAsSVG() {
+      if (diagram && diagram.svg) {
+        diagram.exportAsSVG();
+      } else {
+        alert('ダイアグラムを先に生成してください');
+      }
+    }
+
+    // キーボードショートカット
+    document.addEventListener('keydown', (e) => {
+      // Ctrl/Cmd + Enter でダイアグラム生成
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        generateDiagram();
+      }
+    });
+  </script>
+</body>
+</html>
