@@ -12,7 +12,7 @@ class IshikawaDiagram {
     this.offset = { x: 0, y: 0 };
 
     // ズーム・パン用
-    this.viewBox = { x: 0, y: 0, width: 1400, height: 900 };
+    this.viewBox = { x: 0, y: 0, width: 1600, height: 900 };
     this.isPanning = false;
     this.panStart = { x: 0, y: 0 };
     this.zoomLevel = 1;
@@ -23,14 +23,14 @@ class IshikawaDiagram {
 
     // 描画設定
     this.config = {
-      width: 1400,
+      width: 1600,
       height: 900,
       margin: { left: 50, right: 50, top: 50, bottom: 50 },
 
       // 背骨（主骨）設定
       spine: {
         startX: 100,
-        endX: 1050,
+        endX: 1350,
         y: 450,
         strokeWidth: 4,
         color: '#2c3e50'
@@ -38,18 +38,18 @@ class IshikawaDiagram {
 
       // 特性ボックス設定（縦書き縦長）
       effect: {
-        x: 1050,
+        x: 1400,
         y: 250,
-        width: 60,
+        width: 80,
         height: 400,
-        fontSize: 20,
+        fontSize: 24,
         fontWeight: 'bold'
       },
 
       // 大骨設定
       majorBone: {
         length: 200,
-        angle: 60, // 度（30度→60度に変更）
+        angle: 60, // 度
         strokeWidth: 3,
         color: '#34495e',
         spacing: 250, // 大骨間の間隔
@@ -61,20 +61,20 @@ class IshikawaDiagram {
 
       // 中骨設定
       mediumBone: {
-        length: 120,
+        length: 150,
         strokeWidth: 2,
         color: '#7f8c8d',
-        spacing: 70,
+        spacing: 50,
         fontSize: 14,
         labelOffset: 10
       },
 
       // 小骨設定
       smallBone: {
-        length: 80,
+        length: 100,
         strokeWidth: 1.5,
         color: '#95a5a6',
-        spacing: 35,
+        spacing: 45,
         fontSize: 12,
         labelOffset: 8
       },
@@ -84,7 +84,7 @@ class IshikawaDiagram {
         length: 60,
         strokeWidth: 1,
         color: '#bdc3c7',
-        spacing: 20,
+        spacing: 30,
         fontSize: 11,
         labelOffset: 6
       }
@@ -217,10 +217,10 @@ class IshikawaDiagram {
 
     // 4M配置: 機械(上左)、人(上右)、材料(下左)、方法(下右)
     const layout = [
-      { name: '機械', isTop: true, ratio: 0.3 },   // 上側、左から30%
-      { name: '人', isTop: true, ratio: 0.7 },     // 上側、左から70%
-      { name: '材料', isTop: false, ratio: 0.3 },  // 下側、左から30%
-      { name: '方法', isTop: false, ratio: 0.7 }   // 下側、左から70%
+      { name: '機械', isTop: true, ratio: 0.25 },   // 上側、左から25%
+      { name: '人', isTop: true, ratio: 0.75 },     // 上側、左から75%
+      { name: '材料', isTop: false, ratio: 0.25 },  // 下側、左から25%
+      { name: '方法', isTop: false, ratio: 0.75 }   // 下側、左から75%
     ];
 
     categories.forEach((category, index) => {
@@ -300,7 +300,7 @@ class IshikawaDiagram {
   }
 
   /**
-   * 中骨を描画（水平線、上下配置）
+   * 中骨を描画（水平線、左右配置）
    * @param {Array} causes - 原因配列
    * @param {Object} spinePos - 背骨の位置
    * @param {number} boneEndX - 大骨の終点X
@@ -309,44 +309,43 @@ class IshikawaDiagram {
    * @param {number} majorAngle - 大骨の角度
    */
   drawCauses(causes, spinePos, boneEndX, boneEndY, isTop, majorAngle) {
-    const { length, strokeWidth, color, fontSize } = this.config.mediumBone;
-    const rad = (majorAngle * Math.PI) / 180;
+    const { length, strokeWidth, color, fontSize, spacing } = this.config.mediumBone;
 
     causes.forEach((cause, index) => {
       // 中骨の開始点を大骨上に配置
-      const t = 0.3 + index * 0.25; // 大骨上の位置（0.3, 0.55, 0.8）
+      const t = 0.2 + index * 0.2; // 大骨上の位置（0.2, 0.4, 0.6, 0.8）
       const startX = spinePos.spineX - (spinePos.spineX - boneEndX) * t;
       const startY = isTop
         ? spinePos.spineY - (spinePos.spineY - boneEndY) * t
         : spinePos.spineY + (boneEndY - spinePos.spineY) * t;
 
-      // 中骨は水平線（交互に上下）
-      const causeIsTop = index % 2 === 0 ? isTop : !isTop;
-      const verticalOffset = causeIsTop ? -40 : 40;  // 上下にオフセット
+      // 中骨は左右交互に配置（0:右, 1:左, 2:右, 3:左）
+      const isRight = index % 2 === 0;
+      const direction = isRight ? 1 : -1;  // 右なら+1、左なら-1
 
-      // 開始点をオフセットして、そこから水平に伸ばす
-      const actualStartY = startY + verticalOffset;
-      const endX = startX - length;
-      const endY = actualStartY;
+      // 中骨は水平線で、大骨から左右に伸びる
+      const endX = startX + (direction * length);
+      const endY = startY;
 
       // 中骨の線（水平）
-      const causeLine = this.createLine(startX, actualStartY, endX, endY, strokeWidth, color);
+      const causeLine = this.createLine(startX, startY, endX, endY, strokeWidth, color);
       this.mainGroup.appendChild(causeLine);
 
       // 矢印（大骨側）
-      const arrow = this.createArrowhead(startX, actualStartY, 180, 8, color);
+      const arrowAngle = isRight ? 0 : 180;
+      const arrow = this.createArrowhead(startX, startY, arrowAngle, 8, color);
       this.mainGroup.appendChild(arrow);
 
-      // ラベル（線の横に配置、重複回避）
+      // ラベル（始点=大骨上に配置）
       const labelGroup = this.createGroup();
       const labelWidth = 100;
       const labelHeight = 26;
-      const labelXOffset = -50;
-      const labelYOffset = causeIsTop ? -15 : 15;
+      const labelXOffset = isRight ? 5 : -labelWidth - 5;
+      const labelYOffset = -labelHeight - 5;
 
       const labelBg = this.createRect(
-        endX + labelXOffset,
-        endY + labelYOffset - labelHeight / 2,
+        startX + labelXOffset,
+        startY + labelYOffset,
         labelWidth,
         labelHeight,
         '#ecf0f1',
@@ -356,8 +355,8 @@ class IshikawaDiagram {
       labelGroup.appendChild(labelBg);
 
       const labelText = this.createText(
-        endX + labelXOffset + labelWidth / 2,
-        endY + labelYOffset,
+        startX + labelXOffset + labelWidth / 2,
+        startY + labelYOffset + labelHeight / 2,
         cause.name,
         fontSize,
         'normal',
@@ -371,35 +370,38 @@ class IshikawaDiagram {
       this.elements.push({ type: 'cause', element: labelGroup, data: cause });
 
       // 小骨を描画
-      this.drawSubcauses(cause.subcauses, endX, endY, causeIsTop, majorAngle, index);
+      this.drawSubcauses(cause.subcauses, startX, endX, endY, isRight, majorAngle, index);
     });
   }
 
   /**
    * 小骨を描画（中骨に対し60度、上下配置）
    * @param {Array} subcauses - 副原因配列
+   * @param {number} causeStartX - 中骨の始点X（大骨上）
    * @param {number} causeEndX - 中骨の終点X
    * @param {number} causeEndY - 中骨の終点Y
-   * @param {boolean} causeIsTop - 中骨が上側かどうか
+   * @param {boolean} causeIsRight - 中骨が右側かどうか
    * @param {number} majorAngle - 大骨の角度（60度）
    * @param {number} causeIndex - 中骨のインデックス
    */
-  drawSubcauses(subcauses, causeEndX, causeEndY, causeIsTop, majorAngle, causeIndex) {
-    const { length, strokeWidth, color, spacing, fontSize, labelOffset } = this.config.smallBone;
+  drawSubcauses(subcauses, causeStartX, causeEndX, causeEndY, causeIsRight, majorAngle, causeIndex) {
+    const { length, strokeWidth, color, spacing, fontSize } = this.config.smallBone;
     const angle = 60; // 中骨（水平）に対して60度
     const rad = (angle * Math.PI) / 180;
 
     subcauses.forEach((subcause, index) => {
+      // 小骨の開始点を中骨上に配置
+      const t = (index + 1) / (subcauses.length + 1); // 中骨を均等分割
+      const startX = causeStartX + (causeEndX - causeStartX) * t;
+      const startY = causeEndY;
+
       // 小骨は中骨に対し60度（交互に上下）
       const subcauseIsTop = index % 2 === 0;
       const direction = subcauseIsTop ? -1 : 1;  // 上なら-1、下なら+1
 
-      // 小骨の開始点を中骨上に配置
-      const startX = causeEndX - (index * spacing);
-      const startY = causeEndY;
-
       // 小骨の終点座標を計算（中骨に対し60度）
-      const endX = startX - length * Math.cos(rad);
+      const dx = causeIsRight ? length * Math.cos(rad) : -length * Math.cos(rad);
+      const endX = startX + dx;
       const endY = startY + direction * length * Math.sin(rad);
 
       // 小骨の線
@@ -407,20 +409,25 @@ class IshikawaDiagram {
       this.mainGroup.appendChild(subcauseLine);
 
       // 矢印（中骨側）
-      const arrowAngle = subcauseIsTop ? -angle : angle;
-      const arrow = this.createArrowhead(startX, startY, arrowAngle + 180, 6, color);
+      let arrowAngle;
+      if (causeIsRight) {
+        arrowAngle = subcauseIsTop ? angle + 180 : -angle + 180;
+      } else {
+        arrowAngle = subcauseIsTop ? -angle : angle;
+      }
+      const arrow = this.createArrowhead(startX, startY, arrowAngle, 6, color);
       this.mainGroup.appendChild(arrow);
 
-      // ラベル（重複を避けるため調整）
+      // ラベル（始点=中骨上に配置）
       const labelGroup = this.createGroup();
       const labelWidth = 90;
       const labelHeight = 24;
-      const labelXOffset = -50;
-      const labelYOffset = subcauseIsTop ? -25 : 25;
+      const labelXOffset = subcauseIsTop ? -labelWidth / 2 : -labelWidth / 2;
+      const labelYOffset = subcauseIsTop ? -labelHeight - 5 : 5;
 
       const labelBg = this.createRect(
-        endX + labelXOffset,
-        endY + labelYOffset - labelHeight / 2,
+        startX + labelXOffset,
+        startY + labelYOffset,
         labelWidth,
         labelHeight,
         '#ecf0f1',
@@ -430,8 +437,8 @@ class IshikawaDiagram {
       labelGroup.appendChild(labelBg);
 
       const labelText = this.createText(
-        endX + labelXOffset + labelWidth / 2,
-        endY + labelYOffset,
+        startX + labelXOffset + labelWidth / 2,
+        startY + labelYOffset + labelHeight / 2,
         subcause.name,
         fontSize,
         'normal',
@@ -445,54 +452,59 @@ class IshikawaDiagram {
       this.elements.push({ type: 'subcause', element: labelGroup, data: subcause });
 
       // 孫骨を描画
-      this.drawDetails(subcause.details, endX, endY, subcauseIsTop, majorAngle, index);
+      this.drawDetails(subcause.details, startX, startY, endX, endY, subcauseIsTop, causeIsRight, index);
     });
   }
 
   /**
    * 孫骨を描画（水平線、上下配置）
    * @param {Array} details - 詳細配列
+   * @param {number} subcauseStartX - 小骨の始点X（中骨上）
+   * @param {number} subcauseStartY - 小骨の始点Y（中骨上）
    * @param {number} subcauseEndX - 小骨の終点X
    * @param {number} subcauseEndY - 小骨の終点Y
    * @param {boolean} subcauseIsTop - 小骨が上側かどうか
-   * @param {number} majorAngle - 大骨の角度
+   * @param {boolean} causeIsRight - 中骨が右側かどうか
    * @param {number} subcauseIndex - 小骨のインデックス
    */
-  drawDetails(details, subcauseEndX, subcauseEndY, subcauseIsTop, majorAngle, subcauseIndex) {
-    const { length, strokeWidth, color, spacing, fontSize, labelOffset } = this.config.tinyBone;
+  drawDetails(details, subcauseStartX, subcauseStartY, subcauseEndX, subcauseEndY, subcauseIsTop, causeIsRight, subcauseIndex) {
+    const { length, strokeWidth, color, spacing, fontSize } = this.config.tinyBone;
 
     details.forEach((detail, index) => {
+      // 孫骨の開始点を小骨上に配置（小骨は斜めなのでY座標も変化）
+      const t = (index + 1) / (details.length + 1); // 小骨を均等分割
+
+      const startX = subcauseStartX + (subcauseEndX - subcauseStartX) * t;
+      const startY = subcauseStartY + (subcauseEndY - subcauseStartY) * t;  // Y座標も補間
+
       // 孫骨は水平線（交互に上下）
       const detailIsTop = index % 2 === 0;
-      const verticalOffset = detailIsTop ? -25 : 25;  // 上下にオフセット
+      const verticalDirection = detailIsTop ? -1 : 1;
 
-      // 孫骨の開始点を小骨の終点付近に配置
-      const startX = subcauseEndX - (index * spacing);
-      const startY = subcauseEndY;
-
-      // 開始点をオフセットして、そこから水平に伸ばす
-      const actualStartY = startY + verticalOffset;
-      const endX = startX - length;
-      const endY = actualStartY;
+      // 孫骨は水平に伸びる
+      const direction = causeIsRight ? 1 : -1;
+      const endX = startX + (direction * length);
+      const endY = startY;
 
       // 孫骨の線（水平）
-      const detailLine = this.createLine(startX, actualStartY, endX, endY, strokeWidth, color);
+      const detailLine = this.createLine(startX, startY, endX, endY, strokeWidth, color);
       this.mainGroup.appendChild(detailLine);
 
       // 矢印（小骨側）
-      const arrow = this.createArrowhead(startX, actualStartY, 180, 5, color);
+      const arrowAngle = causeIsRight ? 0 : 180;
+      const arrow = this.createArrowhead(startX, startY, arrowAngle, 5, color);
       this.mainGroup.appendChild(arrow);
 
-      // ラベル（重複を避けるため調整）
+      // ラベル（始点=小骨上に配置）
       const labelGroup = this.createGroup();
-      const labelWidth = 60;
+      const labelWidth = 70;
       const labelHeight = 20;
-      const labelXOffset = -35;
-      const labelYOffset = detailIsTop ? -12 : 12;
+      const labelXOffset = -labelWidth / 2;
+      const labelYOffset = detailIsTop ? -labelHeight - 3 : 3;
 
       const labelBg = this.createRect(
-        endX + labelXOffset,
-        endY + labelYOffset - labelHeight / 2,
+        startX + labelXOffset,
+        startY + labelYOffset,
         labelWidth,
         labelHeight,
         '#ecf0f1',
@@ -502,8 +514,8 @@ class IshikawaDiagram {
       labelGroup.appendChild(labelBg);
 
       const labelText = this.createText(
-        endX + labelXOffset + labelWidth / 2,
-        endY + labelYOffset,
+        startX + labelXOffset + labelWidth / 2,
+        startY + labelYOffset + labelHeight / 2,
         detail,
         fontSize,
         'normal',
@@ -752,7 +764,7 @@ class IshikawaDiagram {
    * ビューをリセット（ダブルクリック）
    */
   resetView() {
-    this.viewBox = { x: 0, y: 0, width: 1400, height: 900 };
+    this.viewBox = { x: 0, y: 0, width: 1600, height: 900 };
     this.zoomLevel = 1;
     this.updateViewBox();
   }
