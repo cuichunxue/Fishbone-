@@ -267,9 +267,9 @@ class IshikawaDiagram {
     );
     this.mainGroup.appendChild(boneLine);
 
-    // 矢印（終点=外側に配置、線の進行方向に沿う）
-    const arrowAngle = pos.isTop ? -angle : angle;
-    const arrow = this.createArrowhead(endX, endY, arrowAngle, 10, color);
+    // 矢印（背骨上に配置、背骨に向かって指す）
+    const arrowAngleTowardSpine = pos.isTop ? (180 - angle) : (180 + angle);
+    const arrow = this.createArrowhead(pos.spineX, pos.spineY, arrowAngleTowardSpine, 10, color);
     this.mainGroup.appendChild(arrow);
 
     // カテゴリーボックス
