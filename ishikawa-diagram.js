@@ -11,6 +11,12 @@ class IshikawaDiagram {
     this.draggingElement = null;
     this.offset = { x: 0, y: 0 };
 
+    // ズーム・パン用
+    this.viewBox = { x: 0, y: 0, width: 1400, height: 900 };
+    this.isPanning = false;
+    this.panStart = { x: 0, y: 0 };
+    this.zoomLevel = 1;
+
     // 描画設定
     this.config = {
       width: 1400,
@@ -89,10 +95,16 @@ class IshikawaDiagram {
 
     // SVG要素を作成
     this.svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    this.svg.setAttribute('width', this.config.width);
-    this.svg.setAttribute('height', this.config.height);
+    this.svg.setAttribute('width', '100%');
+    this.svg.setAttribute('height', '700');
+    this.svg.setAttribute('viewBox', `${this.viewBox.x} ${this.viewBox.y} ${this.viewBox.width} ${this.viewBox.height}`);
     this.svg.style.border = '1px solid #ddd';
     this.svg.style.backgroundColor = '#ffffff';
+    this.svg.style.cursor = 'grab';
+
+    // メインコンテンツグループ
+    this.mainGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    this.svg.appendChild(this.mainGroup);
 
     this.container.appendChild(this.svg);
 
@@ -123,12 +135,12 @@ class IshikawaDiagram {
 
     // 背骨の線
     const spineLine = this.createLine(startX, y, endX, y, strokeWidth, color);
-    this.svg.appendChild(spineLine);
+    this.mainGroup.appendChild(spineLine);
 
     // 矢印
     const arrowSize = 15;
     const arrow = this.createArrowhead(endX, y, 0, arrowSize, color);
-    this.svg.appendChild(arrow);
+    this.mainGroup.appendChild(arrow);
   }
 
   /**
@@ -158,7 +170,7 @@ class IshikawaDiagram {
     // ドラッグ可能に設定
     this.makeGroupDraggable(group, 'effect');
 
-    this.svg.appendChild(group);
+    this.mainGroup.appendChild(group);
     this.elements.push({ type: 'effect', element: group, data: this.data });
   }
 
@@ -236,7 +248,7 @@ class IshikawaDiagram {
       strokeWidth,
       color
     );
-    this.svg.appendChild(boneLine);
+    this.mainGroup.appendChild(boneLine);
 
     // カテゴリーボックス
     const group = this.createGroup();
@@ -263,7 +275,7 @@ class IshikawaDiagram {
     group.appendChild(text);
 
     this.makeGroupDraggable(group, 'category', category);
-    this.svg.appendChild(group);
+    this.mainGroup.appendChild(group);
     this.elements.push({ type: 'category', element: group, data: category });
 
     // 中骨を描画
@@ -297,19 +309,24 @@ class IshikawaDiagram {
 
       // 中骨の線
       const causeLine = this.createLine(startX, startY, endX, endY, strokeWidth, color);
-      this.svg.appendChild(causeLine);
+      this.mainGroup.appendChild(causeLine);
 
       // 矢印（大骨側）
       const arrow = this.createArrowhead(startX, startY, 0, 8, color);
-      this.svg.appendChild(arrow);
+      this.mainGroup.appendChild(arrow);
 
-      // ラベル
+      // ラベル（重複を避けるため左側に配置）
       const labelGroup = this.createGroup();
+      const labelWidth = 110;
+      const labelHeight = 28;
+      const labelX = endX - labelWidth - 5;
+      const labelY = endY - labelHeight / 2;
+
       const labelBg = this.createRect(
-        endX - 100,
-        endY - 15,
-        100,
-        30,
+        labelX,
+        labelY,
+        labelWidth,
+        labelHeight,
         '#ecf0f1',
         '#2c3e50',
         1
@@ -317,7 +334,7 @@ class IshikawaDiagram {
       labelGroup.appendChild(labelBg);
 
       const labelText = this.createText(
-        endX - 50,
+        labelX + labelWidth / 2,
         endY,
         cause.name,
         fontSize,
@@ -328,7 +345,7 @@ class IshikawaDiagram {
       labelGroup.appendChild(labelText);
 
       this.makeGroupDraggable(labelGroup, 'cause', cause);
-      this.svg.appendChild(labelGroup);
+      this.mainGroup.appendChild(labelGroup);
       this.elements.push({ type: 'cause', element: labelGroup, data: cause });
 
       // 小骨を描画
@@ -361,20 +378,25 @@ class IshikawaDiagram {
 
       // 小骨の線
       const subcauseLine = this.createLine(startX, startY, endX, endY, strokeWidth, color);
-      this.svg.appendChild(subcauseLine);
+      this.mainGroup.appendChild(subcauseLine);
 
       // 矢印（中骨側）
       const arrowAngle = isTop ? majorAngle : -majorAngle;
       const arrow = this.createArrowhead(startX, startY, arrowAngle, 6, color);
-      this.svg.appendChild(arrow);
+      this.mainGroup.appendChild(arrow);
 
-      // ラベル
+      // ラベル（重複を避けるため調整）
       const labelGroup = this.createGroup();
+      const labelWidth = 90;
+      const labelHeight = 24;
+      const labelXOffset = isTop ? -45 : -45;
+      const labelYOffset = isTop ? -30 : 30;
+
       const labelBg = this.createRect(
-        endX - 40,
-        endY - 12,
-        80,
-        24,
+        endX + labelXOffset,
+        endY + labelYOffset - labelHeight / 2,
+        labelWidth,
+        labelHeight,
         '#ecf0f1',
         '#34495e',
         1
@@ -382,8 +404,8 @@ class IshikawaDiagram {
       labelGroup.appendChild(labelBg);
 
       const labelText = this.createText(
-        endX,
-        endY,
+        endX + labelXOffset + labelWidth / 2,
+        endY + labelYOffset,
         subcause.name,
         fontSize,
         'normal',
@@ -393,7 +415,7 @@ class IshikawaDiagram {
       labelGroup.appendChild(labelText);
 
       this.makeGroupDraggable(labelGroup, 'subcause', subcause);
-      this.svg.appendChild(labelGroup);
+      this.mainGroup.appendChild(labelGroup);
       this.elements.push({ type: 'subcause', element: labelGroup, data: subcause });
 
       // 孫骨を描画
@@ -422,19 +444,24 @@ class IshikawaDiagram {
 
       // 孫骨の線
       const detailLine = this.createLine(startX, startY, endX, endY, strokeWidth, color);
-      this.svg.appendChild(detailLine);
+      this.mainGroup.appendChild(detailLine);
 
       // 矢印（小骨側）
       const arrow = this.createArrowhead(startX, startY, 0, 5, color);
-      this.svg.appendChild(arrow);
+      this.mainGroup.appendChild(arrow);
 
-      // ラベル
+      // ラベル（重複を避けるため調整）
       const labelGroup = this.createGroup();
+      const labelWidth = 60;
+      const labelHeight = 20;
+      const labelX = endX - labelWidth - 5;
+      const labelY = endY - labelHeight / 2 + (index * 25);  // 縦にずらす
+
       const labelBg = this.createRect(
-        endX - 50,
-        endY - 10,
-        50,
-        20,
+        labelX,
+        labelY,
+        labelWidth,
+        labelHeight,
         '#ecf0f1',
         '#7f8c8d',
         1
@@ -442,8 +469,8 @@ class IshikawaDiagram {
       labelGroup.appendChild(labelBg);
 
       const labelText = this.createText(
-        endX - 25,
-        endY,
+        labelX + labelWidth / 2,
+        labelY + labelHeight / 2,
         detail,
         fontSize,
         'normal',
@@ -453,7 +480,7 @@ class IshikawaDiagram {
       labelGroup.appendChild(labelText);
 
       this.makeGroupDraggable(labelGroup, 'detail', { name: detail });
-      this.svg.appendChild(labelGroup);
+      this.mainGroup.appendChild(labelGroup);
       this.elements.push({ type: 'detail', element: labelGroup, data: { name: detail } });
     });
   }
@@ -540,10 +567,34 @@ class IshikawaDiagram {
    * イベントリスナーを設定
    */
   setupEventListeners() {
+    // ドラッグ&ドロップ
     this.svg.addEventListener('mousedown', this.onMouseDown.bind(this));
     this.svg.addEventListener('mousemove', this.onMouseMove.bind(this));
     this.svg.addEventListener('mouseup', this.onMouseUp.bind(this));
     this.svg.addEventListener('mouseleave', this.onMouseUp.bind(this));
+
+    // ズーム機能（ホイール）
+    this.svg.addEventListener('wheel', this.onWheel.bind(this), { passive: false });
+
+    // パン機能（中クリックまたはSpaceキー押下時）
+    this.svg.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    let spacePressed = false;
+    document.addEventListener('keydown', (e) => {
+      if (e.code === 'Space' && !spacePressed) {
+        spacePressed = true;
+        this.svg.style.cursor = 'grab';
+      }
+    });
+    document.addEventListener('keyup', (e) => {
+      if (e.code === 'Space') {
+        spacePressed = false;
+        this.svg.style.cursor = 'default';
+      }
+    });
+
+    // リセットボタン（ダブルクリック）
+    this.svg.addEventListener('dblclick', this.resetView.bind(this));
   }
 
   /**
@@ -570,15 +621,23 @@ class IshikawaDiagram {
       group = group.parentElement;
     }
 
+    // 中クリックまたはSpaceキー押下時はパン
+    if (e.button === 1 || e.shiftKey) {
+      this.isPanning = true;
+      this.panStart = this.getMousePosition(e);
+      this.svg.style.cursor = 'grabbing';
+      e.preventDefault();
+      return;
+    }
+
     if (group && group.getAttribute('data-draggable') === 'true') {
       this.draggingElement = group;
+      const pt = this.getMousePosition(e);
 
-      const svgRect = this.svg.getBoundingClientRect();
       const matrix = group.getCTM();
-
       this.offset = {
-        x: e.clientX - svgRect.left - matrix.e,
-        y: e.clientY - svgRect.top - matrix.f
+        x: pt.x - matrix.e,
+        y: pt.y - matrix.f
       };
 
       group.style.opacity = '0.7';
@@ -589,11 +648,24 @@ class IshikawaDiagram {
    * マウス移動イベント
    */
   onMouseMove(e) {
+    if (this.isPanning) {
+      const pt = this.getMousePosition(e);
+      const dx = pt.x - this.panStart.x;
+      const dy = pt.y - this.panStart.y;
+
+      this.viewBox.x -= dx;
+      this.viewBox.y -= dy;
+      this.updateViewBox();
+
+      this.panStart = this.getMousePosition(e);
+      return;
+    }
+
     if (!this.draggingElement) return;
 
-    const svgRect = this.svg.getBoundingClientRect();
-    const x = e.clientX - svgRect.left - this.offset.x;
-    const y = e.clientY - svgRect.top - this.offset.y;
+    const pt = this.getMousePosition(e);
+    const x = pt.x - this.offset.x;
+    const y = pt.y - this.offset.y;
 
     this.draggingElement.setAttribute('transform', `translate(${x}, ${y})`);
   }
@@ -602,10 +674,68 @@ class IshikawaDiagram {
    * マウスアップイベント
    */
   onMouseUp(e) {
+    if (this.isPanning) {
+      this.isPanning = false;
+      this.svg.style.cursor = 'grab';
+    }
+
     if (this.draggingElement) {
       this.draggingElement.style.opacity = '1';
       this.draggingElement = null;
     }
+  }
+
+  /**
+   * マウスホイールイベント（ズーム）
+   */
+  onWheel(e) {
+    e.preventDefault();
+
+    const delta = e.deltaY > 0 ? 1.1 : 0.9;
+    const pt = this.getMousePosition(e);
+
+    // ズーム中心点を基準にビューボックスを調整
+    const newWidth = this.viewBox.width * delta;
+    const newHeight = this.viewBox.height * delta;
+
+    const dx = (newWidth - this.viewBox.width) * ((pt.x - this.viewBox.x) / this.viewBox.width);
+    const dy = (newHeight - this.viewBox.height) * ((pt.y - this.viewBox.y) / this.viewBox.height);
+
+    this.viewBox.x -= dx;
+    this.viewBox.y -= dy;
+    this.viewBox.width = newWidth;
+    this.viewBox.height = newHeight;
+
+    this.zoomLevel *= delta;
+    this.updateViewBox();
+  }
+
+  /**
+   * ビューをリセット（ダブルクリック）
+   */
+  resetView() {
+    this.viewBox = { x: 0, y: 0, width: 1400, height: 900 };
+    this.zoomLevel = 1;
+    this.updateViewBox();
+  }
+
+  /**
+   * ビューボックスを更新
+   */
+  updateViewBox() {
+    this.svg.setAttribute('viewBox',
+      `${this.viewBox.x} ${this.viewBox.y} ${this.viewBox.width} ${this.viewBox.height}`);
+  }
+
+  /**
+   * マウス位置を取得（SVG座標系）
+   */
+  getMousePosition(e) {
+    const CTM = this.svg.getScreenCTM();
+    return {
+      x: (e.clientX - CTM.e) / CTM.a,
+      y: (e.clientY - CTM.f) / CTM.d
+    };
   }
 
   // ========== エクスポート機能 ==========
@@ -614,7 +744,17 @@ class IshikawaDiagram {
    * SVGをPNG画像としてダウンロード
    */
   exportAsPNG() {
-    const svgData = new XMLSerializer().serializeToString(this.svg);
+    // SVGのクローンを作成してスタイルを埋め込む
+    const svgClone = this.svg.cloneNode(true);
+    svgClone.setAttribute('width', this.config.width);
+    svgClone.setAttribute('height', this.config.height);
+    svgClone.setAttribute('viewBox', `0 0 ${this.config.width} ${this.config.height}`);
+
+    // SVGをシリアライズ
+    const svgData = new XMLSerializer().serializeToString(svgClone);
+    const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(svgBlob);
+
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     const img = new Image();
@@ -623,34 +763,59 @@ class IshikawaDiagram {
     canvas.height = this.config.height;
 
     img.onload = () => {
+      // 白い背景を描画
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0);
 
+      // PNGとしてダウンロード
       canvas.toBlob((blob) => {
-        const url = URL.createObjectURL(blob);
+        const downloadUrl = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = url;
-        a.download = 'ishikawa-diagram.png';
+        a.href = downloadUrl;
+        a.download = `ishikawa-diagram-${Date.now()}.png`;
+        document.body.appendChild(a);
         a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(downloadUrl);
         URL.revokeObjectURL(url);
-      });
+      }, 'image/png');
     };
 
-    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+    img.onerror = (err) => {
+      console.error('PNG export error:', err);
+      alert('PNG形式でのエクスポートに失敗しました。代わりにSVG形式をお試しください。');
+      URL.revokeObjectURL(url);
+    };
+
+    img.src = url;
   }
 
   /**
    * SVGファイルとしてダウンロード
    */
   exportAsSVG() {
-    const svgData = new XMLSerializer().serializeToString(this.svg);
-    const blob = new Blob([svgData], { type: 'image/svg+xml' });
+    // SVGのクローンを作成
+    const svgClone = this.svg.cloneNode(true);
+    svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    svgClone.setAttribute('width', this.config.width);
+    svgClone.setAttribute('height', this.config.height);
+    svgClone.setAttribute('viewBox', `0 0 ${this.config.width} ${this.config.height}`);
+
+    // SVGをシリアライズ
+    const svgData = new XMLSerializer().serializeToString(svgClone);
+
+    // XML宣言を追加
+    const fullSvg = '<?xml version="1.0" encoding="UTF-8"?>\n' + svgData;
+
+    const blob = new Blob([fullSvg], { type: 'image/svg+xml;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'ishikawa-diagram.svg';
+    a.download = `ishikawa-diagram-${Date.now()}.svg`;
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }
 }
