@@ -48,7 +48,7 @@ class IshikawaDiagram {
 
       // 大骨設定
       majorBone: {
-        length: 650,
+        length: 550,
         angle: 60, // 度
         strokeWidth: 3,
         color: '#34495e',
@@ -319,8 +319,8 @@ class IshikawaDiagram {
     const { length, strokeWidth, color, fontSize, spacing } = this.config.mediumBone;
 
     causes.forEach((cause, index) => {
-      // 中骨の終点を大骨上に配置（間隔を縮めて配置）
-      const t = 0.18 + index * 0.15; // 大骨上の位置（0.18, 0.33, 0.48, 0.63）
+      // 中骨の終点を大骨上に配置（背骨から離し、中骨間隔を縮める）
+      const t = 0.22 + index * 0.13; // 大骨上の位置（0.22, 0.35, 0.48, 0.61）
       const endX = spinePos.spineX - (spinePos.spineX - boneEndX) * t;
       const endY = isTop
         ? spinePos.spineY - (spinePos.spineY - boneEndY) * t
