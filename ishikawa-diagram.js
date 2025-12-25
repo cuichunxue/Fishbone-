@@ -61,7 +61,7 @@ class IshikawaDiagram {
 
       // 中骨設定
       mediumBone: {
-        length: 200,
+        length: 280,
         strokeWidth: 2,
         color: '#7f8c8d',
         spacing: 50,
