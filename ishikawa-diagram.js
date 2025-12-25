@@ -12,7 +12,7 @@ class IshikawaDiagram {
     this.offset = { x: 0, y: 0 };
 
     // ズーム・パン用
-    this.viewBox = { x: 0, y: 0, width: 1600, height: 900 };
+    this.viewBox = { x: 0, y: 0, width: 1800, height: 1000 };
     this.isPanning = false;
     this.panStart = { x: 0, y: 0 };
     this.zoomLevel = 1;
@@ -23,23 +23,23 @@ class IshikawaDiagram {
 
     // 描画設定
     this.config = {
-      width: 1600,
-      height: 900,
+      width: 1800,
+      height: 1000,
       margin: { left: 50, right: 50, top: 50, bottom: 50 },
 
       // 背骨（主骨）設定
       spine: {
         startX: 100,
-        endX: 1350,
-        y: 450,
+        endX: 1500,
+        y: 500,
         strokeWidth: 4,
         color: '#2c3e50'
       },
 
       // 特性ボックス設定（縦書き縦長）
       effect: {
-        x: 1400,
-        y: 250,
+        x: 1550,
+        y: 300,
         width: 80,
         height: 400,
         fontSize: 24,
@@ -48,7 +48,7 @@ class IshikawaDiagram {
 
       // 大骨設定
       majorBone: {
-        length: 200,
+        length: 280,
         angle: 60, // 度
         strokeWidth: 3,
         color: '#34495e',
@@ -61,7 +61,7 @@ class IshikawaDiagram {
 
       // 中骨設定
       mediumBone: {
-        length: 150,
+        length: 200,
         strokeWidth: 2,
         color: '#7f8c8d',
         spacing: 50,
@@ -71,7 +71,7 @@ class IshikawaDiagram {
 
       // 小骨設定
       smallBone: {
-        length: 100,
+        length: 90,
         strokeWidth: 1.5,
         color: '#95a5a6',
         spacing: 45,
@@ -81,7 +81,7 @@ class IshikawaDiagram {
 
       // 孫骨設定
       tinyBone: {
-        length: 60,
+        length: 55,
         strokeWidth: 1,
         color: '#bdc3c7',
         spacing: 30,
@@ -217,10 +217,10 @@ class IshikawaDiagram {
 
     // 4M配置: 機械(上左)、人(上右)、材料(下左)、方法(下右)
     const layout = [
-      { name: '機械', isTop: true, ratio: 0.25 },   // 上側、左から25%
-      { name: '人', isTop: true, ratio: 0.75 },     // 上側、左から75%
-      { name: '材料', isTop: false, ratio: 0.25 },  // 下側、左から25%
-      { name: '方法', isTop: false, ratio: 0.75 }   // 下側、左から75%
+      { name: '機械', isTop: true, ratio: 0.2 },    // 上側、左から20%
+      { name: '人', isTop: true, ratio: 0.8 },      // 上側、左から80%
+      { name: '材料', isTop: false, ratio: 0.2 },   // 下側、左から20%
+      { name: '方法', isTop: false, ratio: 0.8 }    // 下側、左から80%
     ];
 
     categories.forEach((category, index) => {
@@ -331,37 +331,24 @@ class IshikawaDiagram {
       const causeLine = this.createLine(startX, startY, endX, endY, strokeWidth, color);
       this.mainGroup.appendChild(causeLine);
 
-      // 矢印（大骨側）
+      // 矢印（終点に向かう）
       const arrowAngle = isRight ? 0 : 180;
-      const arrow = this.createArrowhead(startX, startY, arrowAngle, 8, color);
+      const arrow = this.createArrowhead(endX, endY, arrowAngle, 8, color);
       this.mainGroup.appendChild(arrow);
 
-      // ラベル（始点=大骨上に配置）
+      // ラベル（始点=大骨上にテキストのみ）
       const labelGroup = this.createGroup();
-      const labelWidth = 100;
-      const labelHeight = 26;
-      const labelXOffset = isRight ? 5 : -labelWidth - 5;
-      const labelYOffset = -labelHeight - 5;
-
-      const labelBg = this.createRect(
-        startX + labelXOffset,
-        startY + labelYOffset,
-        labelWidth,
-        labelHeight,
-        '#ecf0f1',
-        '#2c3e50',
-        1.5
-      );
-      labelGroup.appendChild(labelBg);
+      const labelXOffset = isRight ? 5 : -5;
+      const labelYOffset = -8;
 
       const labelText = this.createText(
-        startX + labelXOffset + labelWidth / 2,
-        startY + labelYOffset + labelHeight / 2,
+        startX + labelXOffset,
+        startY + labelYOffset,
         cause.name,
         fontSize,
         'normal',
         '#2c3e50',
-        'middle'
+        isRight ? 'start' : 'end'
       );
       labelGroup.appendChild(labelText);
 
@@ -408,37 +395,24 @@ class IshikawaDiagram {
       const subcauseLine = this.createLine(startX, startY, endX, endY, strokeWidth, color);
       this.mainGroup.appendChild(subcauseLine);
 
-      // 矢印（中骨側）
+      // 矢印（終点に向かう）
       let arrowAngle;
       if (causeIsRight) {
-        arrowAngle = subcauseIsTop ? angle + 180 : -angle + 180;
+        arrowAngle = subcauseIsTop ? angle : -angle;
       } else {
-        arrowAngle = subcauseIsTop ? -angle : angle;
+        arrowAngle = subcauseIsTop ? 180 - angle : 180 + angle;
       }
-      const arrow = this.createArrowhead(startX, startY, arrowAngle, 6, color);
+      const arrow = this.createArrowhead(endX, endY, arrowAngle, 6, color);
       this.mainGroup.appendChild(arrow);
 
-      // ラベル（始点=中骨上に配置）
+      // ラベル（始点=中骨上にテキストのみ）
       const labelGroup = this.createGroup();
-      const labelWidth = 90;
-      const labelHeight = 24;
-      const labelXOffset = subcauseIsTop ? -labelWidth / 2 : -labelWidth / 2;
-      const labelYOffset = subcauseIsTop ? -labelHeight - 5 : 5;
-
-      const labelBg = this.createRect(
-        startX + labelXOffset,
-        startY + labelYOffset,
-        labelWidth,
-        labelHeight,
-        '#ecf0f1',
-        '#34495e',
-        1
-      );
-      labelGroup.appendChild(labelBg);
+      const labelXOffset = 0;
+      const labelYOffset = subcauseIsTop ? -5 : 15;
 
       const labelText = this.createText(
-        startX + labelXOffset + labelWidth / 2,
-        startY + labelYOffset + labelHeight / 2,
+        startX + labelXOffset,
+        startY + labelYOffset,
         subcause.name,
         fontSize,
         'normal',
@@ -490,32 +464,19 @@ class IshikawaDiagram {
       const detailLine = this.createLine(startX, startY, endX, endY, strokeWidth, color);
       this.mainGroup.appendChild(detailLine);
 
-      // 矢印（小骨側）
+      // 矢印（終点に向かう）
       const arrowAngle = causeIsRight ? 0 : 180;
-      const arrow = this.createArrowhead(startX, startY, arrowAngle, 5, color);
+      const arrow = this.createArrowhead(endX, endY, arrowAngle, 5, color);
       this.mainGroup.appendChild(arrow);
 
-      // ラベル（始点=小骨上に配置）
+      // ラベル（始点=小骨上にテキストのみ）
       const labelGroup = this.createGroup();
-      const labelWidth = 70;
-      const labelHeight = 20;
-      const labelXOffset = -labelWidth / 2;
-      const labelYOffset = detailIsTop ? -labelHeight - 3 : 3;
-
-      const labelBg = this.createRect(
-        startX + labelXOffset,
-        startY + labelYOffset,
-        labelWidth,
-        labelHeight,
-        '#ecf0f1',
-        '#7f8c8d',
-        1
-      );
-      labelGroup.appendChild(labelBg);
+      const labelXOffset = 0;
+      const labelYOffset = detailIsTop ? -5 : 15;
 
       const labelText = this.createText(
-        startX + labelXOffset + labelWidth / 2,
-        startY + labelYOffset + labelHeight / 2,
+        startX + labelXOffset,
+        startY + labelYOffset,
         detail,
         fontSize,
         'normal',
@@ -764,7 +725,7 @@ class IshikawaDiagram {
    * ビューをリセット（ダブルクリック）
    */
   resetView() {
-    this.viewBox = { x: 0, y: 0, width: 1600, height: 900 };
+    this.viewBox = { x: 0, y: 0, width: 1800, height: 1000 };
     this.zoomLevel = 1;
     this.updateViewBox();
   }
