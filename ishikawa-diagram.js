@@ -152,37 +152,50 @@ class IshikawaDiagram {
    * 特性ボックスを描画（縦書き縦長）
    */
   drawEffect() {
-    const { x, y, width, height, fontSize, fontWeight } = this.config.effect;
+    const { x, y, fontSize, fontWeight } = this.config.effect;
+    const maxCharsPerColumn = 18; // 1列あたりの最大文字数
+    const columnSpacing = 30; // 列間隔
+
+    const chars = this.data.effect.split('');
+    const numColumns = Math.ceil(chars.length / maxCharsPerColumn);
+    const totalWidth = 50 + (numColumns - 1) * columnSpacing;
+    const height = 500;
 
     const group = this.createGroup();
 
     // ボックス
-    const rect = this.createRect(x, y, width, height, '#e74c3c', '#fff', 2);
+    const rect = this.createRect(x, y, totalWidth, height, '#e74c3c', '#fff', 2);
     group.appendChild(rect);
 
-    // テキスト（縦書き）
-    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    text.setAttribute('x', x + width / 2);
-    text.setAttribute('y', y + 30);
-    text.setAttribute('font-size', fontSize);
-    text.setAttribute('font-weight', fontWeight);
-    text.setAttribute('fill', '#fff');
-    text.setAttribute('text-anchor', 'middle');
-    text.setAttribute('writing-mode', 'tb');  // 縦書き
-    text.setAttribute('glyph-orientation-vertical', '0');
+    // 各列にテキストを配置
+    for (let col = 0; col < numColumns; col++) {
+      const startIdx = col * maxCharsPerColumn;
+      const endIdx = Math.min(startIdx + maxCharsPerColumn, chars.length);
+      const columnChars = chars.slice(startIdx, endIdx);
 
-    // 1文字ずつ縦に配置
-    const chars = this.data.effect.split('');
-    let currentY = y + 40;
-    chars.forEach(char => {
-      const tspan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
-      tspan.setAttribute('x', x + width / 2);
-      tspan.setAttribute('dy', fontSize + 5);
-      tspan.textContent = char;
-      text.appendChild(tspan);
-    });
+      // 列ごとにtext要素を作成
+      const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      const xPos = x + 25 + col * columnSpacing;
+      text.setAttribute('x', xPos);
+      text.setAttribute('y', y + 30);
+      text.setAttribute('font-size', fontSize);
+      text.setAttribute('font-weight', fontWeight);
+      text.setAttribute('fill', '#fff');
+      text.setAttribute('text-anchor', 'middle');
+      text.setAttribute('writing-mode', 'tb');  // 縦書き
+      text.setAttribute('glyph-orientation-vertical', '0');
 
-    group.appendChild(text);
+      // 1文字ずつ縦に配置
+      columnChars.forEach(char => {
+        const tspan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
+        tspan.setAttribute('x', xPos);
+        tspan.setAttribute('dy', fontSize + 5);
+        tspan.textContent = char;
+        text.appendChild(tspan);
+      });
+
+      group.appendChild(text);
+    }
 
     // ドラッグ可能に設定
     this.makeGroupDraggable(group, 'effect');
