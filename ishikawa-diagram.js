@@ -39,10 +39,10 @@ class IshikawaDiagram {
       // 特性ボックス設定（縦書き縦長）
       effect: {
         x: 1550,
-        y: 300,
+        y: 250,
         width: 80,
-        height: 400,
-        fontSize: 24,
+        height: 500,
+        fontSize: 20,
         fontWeight: 'bold'
       },
 
