@@ -104,7 +104,7 @@ class IshikawaDiagram {
     this.svg.setAttribute('viewBox', `${this.viewBox.x} ${this.viewBox.y} ${this.viewBox.width} ${this.viewBox.height}`);
     this.svg.style.border = '1px solid #ddd';
     this.svg.style.backgroundColor = '#ffffff';
-    this.svg.style.cursor = 'grab';
+    this.svg.style.cursor = 'default';
     this.svg.style.touchAction = 'none'; // タッチ操作を完全制御
 
     // メインコンテンツグループ
@@ -689,7 +689,7 @@ class IshikawaDiagram {
       group = group.parentElement;
     }
 
-    // 中クリックまたはSpaceキー押下時はパン
+    // 中クリックまたはShiftキー押下時はパン
     if (e.button === 1 || e.shiftKey) {
       this.isPanning = true;
       this.panStart = this.getMousePosition(e);
@@ -709,6 +709,11 @@ class IshikawaDiagram {
       };
 
       group.style.opacity = '0.7';
+    } else {
+      // 背景（空白部分）をクリックした場合はグラフ全体を移動
+      this.isPanning = true;
+      this.panStart = this.getMousePosition(e);
+      this.svg.style.cursor = 'grabbing';
     }
   }
 
@@ -744,7 +749,7 @@ class IshikawaDiagram {
   onMouseUp(e) {
     if (this.isPanning) {
       this.isPanning = false;
-      this.svg.style.cursor = 'grab';
+      this.svg.style.cursor = 'default';
     }
 
     if (this.draggingElement) {
