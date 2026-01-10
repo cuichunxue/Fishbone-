@@ -12,7 +12,7 @@ class IshikawaDiagram {
     this.offset = { x: 0, y: 0 };
 
     // ズーム・パン用
-    this.viewBox = { x: 0, y: 0, width: 1800, height: 1000 };
+    this.viewBox = { x: 0, y: 0, width: 2000, height: 1000 };
     this.isPanning = false;
     this.panStart = { x: 0, y: 0 };
     this.zoomLevel = 1;
@@ -23,14 +23,14 @@ class IshikawaDiagram {
 
     // 描画設定
     this.config = {
-      width: 1800,
+      width: 2000,
       height: 1000,
       margin: { left: 50, right: 50, top: 50, bottom: 50 },
 
       // 背骨（主骨）設定
       spine: {
         startX: 100,
-        endX: 1550,
+        endX: 1650,
         y: 500,
         strokeWidth: 4,
         color: '#2c3e50'
@@ -38,7 +38,7 @@ class IshikawaDiagram {
 
       // 特性ボックス設定（縦書き縦長）
       effect: {
-        x: 1700,
+        x: 1800,
         y: 250,
         width: 80,
         height: 500,
@@ -61,7 +61,7 @@ class IshikawaDiagram {
 
       // 中骨設定
       mediumBone: {
-        length: 230,
+        length: 250,
         strokeWidth: 2,
         color: '#7f8c8d',
         spacing: 50,
@@ -787,7 +787,7 @@ class IshikawaDiagram {
    * ビューをリセット（ダブルクリック）
    */
   resetView() {
-    this.viewBox = { x: 0, y: 0, width: 1800, height: 1000 };
+    this.viewBox = { x: 0, y: 0, width: 2000, height: 1000 };
     this.zoomLevel = 1;
     this.updateViewBox();
   }
