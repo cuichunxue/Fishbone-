@@ -38,7 +38,7 @@ class IshikawaDiagram {
 
       // 特性ボックス設定（縦書き縦長）
       effect: {
-        x: 1550,
+        x: 1700,
         y: 250,
         width: 80,
         height: 500,
@@ -61,7 +61,7 @@ class IshikawaDiagram {
 
       // 中骨設定
       mediumBone: {
-        length: 280,
+        length: 230,
         strokeWidth: 2,
         color: '#7f8c8d',
         spacing: 50,
