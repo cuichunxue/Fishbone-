@@ -143,6 +143,13 @@ class IshikawaDiagram {
   render(data) {
     this.data = data;
     this.elements = [];
+
+    // 大骨の数に応じて動的にviewBoxを設定
+    const numCategories = data.categories.length;
+    const dynamicWidth = this.calculateSVGWidth(numCategories);
+    this.viewBox = { x: 0, y: 0, width: dynamicWidth, height: 1000 };
+    this.config.width = dynamicWidth;
+
     this.initialize();
 
     // 描画順序：背骨 → 大骨 → 中骨 → 小骨 → 孫骨 → ラベル
@@ -294,27 +301,81 @@ class IshikawaDiagram {
   }
 
   /**
+   * 大骨の数に応じてSVG全体の幅を計算
+   * @param {number} numCategories - カテゴリー数
+   * @returns {number} SVG幅
+   */
+  calculateSVGWidth(numCategories) {
+    // 基準: 4M = 1900px
+    if (numCategories <= 2) {
+      return 1600;
+    } else if (numCategories === 3) {
+      return 1750;
+    } else if (numCategories === 4) {
+      return 1900;
+    } else if (numCategories === 5) {
+      return 2050;
+    } else if (numCategories === 6) {
+      return 2200;
+    } else {
+      // 7M以上: 大骨1つ増えるごとに150px追加
+      return 2200 + (numCategories - 6) * 150;
+    }
+  }
+
+  /**
    * 大骨の数に応じて背骨の終点X座標を計算
    * @param {number} numCategories - カテゴリー数
    * @returns {number} 背骨の終点X座標
    */
   calculateSpineEndX(numCategories) {
     // 基準: 4M = 1600px
-    // 3M以下 = 1400px
-    // 5M = 1750px
-    // 6M以上 = 1850px
-    const baseEndX = 1600;
-    const increment = 150; // 1つ増えるごとに150px延長
+    // SVG幅の約84%を背骨の長さとする
+    const svgWidth = this.calculateSVGWidth(numCategories);
+    return Math.round(svgWidth * 0.84);
+  }
 
+  /**
+   * 大骨の数に応じて大骨の長さを計算
+   * @param {number} numCategories - カテゴリー数
+   * @returns {number} 大骨の長さ
+   */
+  calculateMajorBoneLength(numCategories) {
+    // 基準: 4M = 550px
+    // 大骨が多いほど干渉を防ぐため少し短くする
     if (numCategories <= 3) {
-      return 1400;
+      return 550;
     } else if (numCategories === 4) {
-      return baseEndX;
+      return 550;
     } else if (numCategories === 5) {
-      return 1750;
+      return 530;
+    } else if (numCategories === 6) {
+      return 520;
     } else {
-      // 6M以上
-      return 1850;
+      // 7M以上: さらに短く
+      return Math.max(480, 520 - (numCategories - 6) * 10);
+    }
+  }
+
+  /**
+   * 大骨の数に応じて中骨の長さを計算
+   * @param {number} numCategories - カテゴリー数
+   * @returns {number} 中骨の長さ
+   */
+  calculateMediumBoneLength(numCategories) {
+    // 基準: 4M = 260px
+    // 大骨が多いほど少し短くする
+    if (numCategories <= 3) {
+      return 270;
+    } else if (numCategories === 4) {
+      return 260;
+    } else if (numCategories === 5) {
+      return 250;
+    } else if (numCategories === 6) {
+      return 240;
+    } else {
+      // 7M以上
+      return Math.max(220, 240 - (numCategories - 6) * 5);
     }
   }
 
@@ -335,7 +396,11 @@ class IshikawaDiagram {
    * @param {number} index - インデックス
    */
   drawCategory(category, pos, index) {
-    const { length, angle, strokeWidth, color, boxWidth, boxHeight, fontSize, fontWeight } = this.config.majorBone;
+    const { angle, strokeWidth, color, boxWidth, boxHeight, fontSize, fontWeight } = this.config.majorBone;
+
+    // 大骨の長さを動的に計算
+    const numCategories = this.data.categories.length;
+    const length = this.calculateMajorBoneLength(numCategories);
 
     // 大骨の角度をラジアンに変換
     const rad = (angle * Math.PI) / 180;
@@ -406,7 +471,11 @@ class IshikawaDiagram {
    * @param {number} majorAngle - 大骨の角度
    */
   drawCauses(causes, spinePos, boneEndX, boneEndY, isTop, majorAngle) {
-    const { length, strokeWidth, color, fontSize, spacing } = this.config.mediumBone;
+    const { strokeWidth, color, fontSize, spacing } = this.config.mediumBone;
+
+    // 中骨の長さを動的に計算
+    const numCategories = this.data.categories.length;
+    const length = this.calculateMediumBoneLength(numCategories);
 
     causes.forEach((cause, index) => {
       // 中骨の終点を大骨上に配置（均等間隔で配置）
@@ -864,7 +933,9 @@ class IshikawaDiagram {
    * ビューをリセット（ダブルクリック）
    */
   resetView() {
-    this.viewBox = { x: 0, y: 0, width: 1900, height: 1000 };
+    // 動的なviewBox幅を使用
+    const dynamicWidth = this.config.width || 1900;
+    this.viewBox = { x: 0, y: 0, width: dynamicWidth, height: 1000 };
     this.zoomLevel = 1;
     this.updateViewBox();
   }
