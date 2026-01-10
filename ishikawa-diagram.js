@@ -330,9 +330,9 @@ class IshikawaDiagram {
    */
   calculateSpineEndX(numCategories) {
     // 基準: 4M = 1600px
-    // SVG幅の約84%を背骨の長さとする
+    // SVG幅の約88%を背骨の長さとする（右端のスペースを削減）
     const svgWidth = this.calculateSVGWidth(numCategories);
-    return Math.round(svgWidth * 0.84);
+    return Math.round(svgWidth * 0.88);
   }
 
   /**
@@ -363,19 +363,19 @@ class IshikawaDiagram {
    * @returns {number} 中骨の長さ
    */
   calculateMediumBoneLength(numCategories) {
-    // 基準: 4M = 260px
+    // 基準: 4M = 230px（干渉防止のため短縮）
     // 大骨が多いほど少し短くする
     if (numCategories <= 3) {
-      return 270;
-    } else if (numCategories === 4) {
-      return 260;
-    } else if (numCategories === 5) {
-      return 250;
-    } else if (numCategories === 6) {
       return 240;
+    } else if (numCategories === 4) {
+      return 230;
+    } else if (numCategories === 5) {
+      return 220;
+    } else if (numCategories === 6) {
+      return 210;
     } else {
       // 7M以上
-      return Math.max(220, 240 - (numCategories - 6) * 5);
+      return Math.max(190, 210 - (numCategories - 6) * 5);
     }
   }
 
@@ -386,7 +386,7 @@ class IshikawaDiagram {
   calculateEffectX() {
     const numCategories = this.data.categories.length;
     const spineEndX = this.calculateSpineEndX(numCategories);
-    return spineEndX + 150; // 背骨の終点から150px右
+    return spineEndX + 100; // 背骨の終点から100px右（右端のスペースを削減）
   }
 
   /**
