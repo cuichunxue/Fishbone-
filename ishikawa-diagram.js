@@ -25,6 +25,16 @@ class IshikawaDiagram {
     this.resizeObserver = null;
     this.resizeTimeout = null;
 
+    // ブレークポイント定義
+    this.breakpoints = {
+      smallMobile: 480,      // 小型スマートフォン
+      mobile: 768,           // 標準スマートフォン
+      tablet: 1024,          // タブレット
+      laptop: 1440,          // ノートPC/小型デスクトップ
+      desktop: 1920          // 標準デスクトップ
+      // 1920px以上: 大型デスクトップ
+    };
+
     // 描画設定
     this.config = {
       width: 1900,
@@ -848,26 +858,137 @@ class IshikawaDiagram {
     if (!this.svg || !this.container) return;
 
     const containerWidth = this.container.clientWidth;
+    const containerHeight = this.container.clientHeight;
+    const viewportHeight = window.innerHeight;
     const aspectRatio = this.config.width / this.config.height; // 1900 / 1000 = 1.9
 
-    // コンテナの幅に基づいて高さを計算
+    // デバイスの向きを検出
+    const isPortrait = window.innerHeight > window.innerWidth;
+
+    // デバイスタイプを判定
+    const deviceType = this.getDeviceType(containerWidth);
+
+    // ブレークポイント別の設定
+    let heightConfig = this.getHeightConfig(deviceType, containerWidth, viewportHeight, isPortrait);
+
+    // アスペクト比から基本の高さを計算
     let svgHeight = containerWidth / aspectRatio;
 
-    // ビューポートの高さを超えないように制限
-    const maxHeight = window.innerHeight * 0.9; // ビューポートの90%まで
-    if (svgHeight > maxHeight) {
-      svgHeight = maxHeight;
+    // デバイス別の最適化
+    switch (deviceType) {
+      case 'smallMobile':
+        // 小型スマートフォン (< 480px)
+        svgHeight = Math.min(svgHeight, heightConfig.max);
+        this.svg.style.height = `${svgHeight}px`;
+        this.svg.style.minHeight = `${heightConfig.min}px`;
+        break;
+
+      case 'mobile':
+        // 標準スマートフォン (480-768px)
+        svgHeight = Math.min(svgHeight, heightConfig.max);
+        if (isPortrait) {
+          // 縦向き: コンパクトに表示
+          this.svg.style.height = `${Math.min(svgHeight, viewportHeight * 0.6)}px`;
+        } else {
+          // 横向き: より広く表示
+          this.svg.style.height = `${Math.min(svgHeight, viewportHeight * 0.85)}px`;
+        }
+        this.svg.style.minHeight = `${heightConfig.min}px`;
+        break;
+
+      case 'tablet':
+        // タブレット (768-1024px)
+        if (isPortrait) {
+          // 縦向き: 適度なサイズ
+          svgHeight = Math.min(svgHeight, viewportHeight * 0.7);
+        } else {
+          // 横向き: 大きめに表示
+          svgHeight = Math.min(svgHeight, viewportHeight * 0.8);
+        }
+        this.svg.style.height = `${Math.max(heightConfig.min, Math.min(svgHeight, heightConfig.max))}px`;
+        break;
+
+      case 'laptop':
+        // ノートPC/小型デスクトップ (1024-1440px)
+        svgHeight = Math.min(svgHeight, viewportHeight * 0.85);
+        this.svg.style.height = `${Math.max(heightConfig.min, Math.min(svgHeight, heightConfig.max))}px`;
+        break;
+
+      case 'desktop':
+        // 標準デスクトップ (1440-1920px)
+        svgHeight = Math.min(svgHeight, viewportHeight * 0.9);
+        this.svg.style.height = `${Math.max(heightConfig.min, Math.min(svgHeight, heightConfig.max))}px`;
+        break;
+
+      case 'largeDesktop':
+        // 大型デスクトップ (> 1920px)
+        svgHeight = Math.min(svgHeight, 1000); // 最大1000pxに固定
+        this.svg.style.height = `${svgHeight}px`;
+        break;
     }
 
-    // SVGの高さを設定（最小値500px、最大値1000px）
-    const finalHeight = Math.max(500, Math.min(svgHeight, 1000));
-    this.svg.style.height = `${finalHeight}px`;
+    // コンテナにデバイスタイプを設定（CSS用）
+    this.container.setAttribute('data-device-type', deviceType);
+    this.container.setAttribute('data-orientation', isPortrait ? 'portrait' : 'landscape');
+  }
 
-    // 小さい画面では初期ズームを調整
-    if (containerWidth < 768) {
-      // モバイルデバイス: ズームアウトして全体を表示
-      this.svg.style.height = `${Math.min(finalHeight, 600)}px`;
+  /**
+   * デバイスタイプを判定
+   */
+  getDeviceType(width) {
+    if (width < this.breakpoints.smallMobile) {
+      return 'smallMobile';
+    } else if (width < this.breakpoints.mobile) {
+      return 'mobile';
+    } else if (width < this.breakpoints.tablet) {
+      return 'tablet';
+    } else if (width < this.breakpoints.laptop) {
+      return 'laptop';
+    } else if (width < this.breakpoints.desktop) {
+      return 'desktop';
+    } else {
+      return 'largeDesktop';
     }
+  }
+
+  /**
+   * デバイス別の高さ設定を取得
+   */
+  getHeightConfig(deviceType, containerWidth, viewportHeight, isPortrait) {
+    const configs = {
+      smallMobile: {
+        min: 300,
+        max: isPortrait ? 450 : 350,
+        ideal: containerWidth / 1.9
+      },
+      mobile: {
+        min: 350,
+        max: isPortrait ? 550 : 450,
+        ideal: containerWidth / 1.9
+      },
+      tablet: {
+        min: 400,
+        max: isPortrait ? 700 : 600,
+        ideal: containerWidth / 1.9
+      },
+      laptop: {
+        min: 500,
+        max: 850,
+        ideal: containerWidth / 1.9
+      },
+      desktop: {
+        min: 600,
+        max: 1000,
+        ideal: containerWidth / 1.9
+      },
+      largeDesktop: {
+        min: 700,
+        max: 1000,
+        ideal: 1000
+      }
+    };
+
+    return configs[deviceType] || configs.desktop;
   }
 
   /**
