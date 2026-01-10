@@ -306,20 +306,20 @@ class IshikawaDiagram {
    * @returns {number} SVG幅
    */
   calculateSVGWidth(numCategories) {
-    // 基準: 4M = 2200px（大骨間の距離確保＆全体バランス最適化）
+    // 基準: 4M = 2100px（全体バランス最適化）
     if (numCategories <= 2) {
-      return 1800;
+      return 1700;
     } else if (numCategories === 3) {
-      return 2000;
+      return 1900;
     } else if (numCategories === 4) {
-      return 2200;
+      return 2100;
     } else if (numCategories === 5) {
-      return 2400;
+      return 2300;
     } else if (numCategories === 6) {
-      return 2600;
+      return 2500;
     } else {
       // 7M以上: 大骨1つ増えるごとに200px追加
-      return 2600 + (numCategories - 6) * 200;
+      return 2500 + (numCategories - 6) * 200;
     }
   }
 
@@ -329,9 +329,9 @@ class IshikawaDiagram {
    * @returns {number} 背骨の終点X座標
    */
   calculateSpineEndX(numCategories) {
-    // SVG幅の約87%を背骨の長さとする（効果ボックスに近づける）
+    // SVG幅の約88%を背骨の長さとする（効果ボックスに近づける）
     const svgWidth = this.calculateSVGWidth(numCategories);
-    return Math.round(svgWidth * 0.87);
+    return Math.round(svgWidth * 0.88);
   }
 
   /**
@@ -340,19 +340,19 @@ class IshikawaDiagram {
    * @returns {number} 大骨の長さ
    */
   calculateMajorBoneLength(numCategories) {
-    // 基準: 4M = 550px
+    // 基準: 4M = 600px（見栄えを良くするため延長）
     // 大骨が多いほど干渉を防ぐため少し短くする
     if (numCategories <= 3) {
-      return 550;
+      return 600;
     } else if (numCategories === 4) {
-      return 550;
+      return 600;
     } else if (numCategories === 5) {
-      return 530;
+      return 580;
     } else if (numCategories === 6) {
-      return 520;
+      return 560;
     } else {
       // 7M以上: さらに短く
-      return Math.max(480, 520 - (numCategories - 6) * 10);
+      return Math.max(520, 560 - (numCategories - 6) * 10);
     }
   }
 
@@ -362,19 +362,19 @@ class IshikawaDiagram {
    * @returns {number} 中骨の長さ
    */
   calculateMediumBoneLength(numCategories) {
-    // 基準: 4M = 120px（小骨と背骨の干渉を完全に防止、最大限の余裕確保）
+    // 基準: 4M = 100px（小骨と背骨の干渉を完全に防止、最大限の余裕確保）
     // 大骨が多いほど少し短くする
     if (numCategories <= 3) {
-      return 130;
-    } else if (numCategories === 4) {
-      return 120;
-    } else if (numCategories === 5) {
-      return 115;
-    } else if (numCategories === 6) {
       return 110;
+    } else if (numCategories === 4) {
+      return 100;
+    } else if (numCategories === 5) {
+      return 95;
+    } else if (numCategories === 6) {
+      return 90;
     } else {
       // 7M以上
-      return Math.max(90, 110 - (numCategories - 6) * 5);
+      return Math.max(70, 90 - (numCategories - 6) * 5);
     }
   }
 
