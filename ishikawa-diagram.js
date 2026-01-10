@@ -155,7 +155,11 @@ class IshikawaDiagram {
    * 背骨（主骨）を描画
    */
   drawSpine() {
-    const { startX, endX, y, strokeWidth, color } = this.config.spine;
+    const { startX, y, strokeWidth, color } = this.config.spine;
+
+    // 大骨の数に応じて背骨の終点を動的に計算
+    const numCategories = this.data.categories.length;
+    const endX = this.calculateSpineEndX(numCategories);
 
     // 背骨の線
     const spineLine = this.createLine(startX, y, endX, y, strokeWidth, color);
@@ -171,7 +175,11 @@ class IshikawaDiagram {
    * 特性ボックスを描画（縦書き縦長）
    */
   drawEffect() {
-    const { x, y, fontSize, fontWeight } = this.config.effect;
+    const { y, fontSize, fontWeight } = this.config.effect;
+
+    // 効果ボックスのX座標を動的に計算
+    const x = this.calculateEffectX();
+
     const maxCharsPerColumn = 18; // 1列あたりの最大文字数
     const columnSpacing = 30; // 列間隔
 
@@ -227,7 +235,7 @@ class IshikawaDiagram {
    * カテゴリー（大骨）とその配下を描画
    */
   drawCategories() {
-    const categories = this.data.categories.slice(0, 4); // 4M固定
+    const categories = this.data.categories; // 動的に全カテゴリーを取得
     const positions = this.calculateCategoryPositions(categories);
 
     categories.forEach((category, index) => {
@@ -242,32 +250,82 @@ class IshikawaDiagram {
    * @returns {Array} 位置情報の配列
    */
   calculateCategoryPositions(categories) {
-    const { startX, endX, y } = this.config.spine;
-    const totalWidth = endX - startX;
+    const numCategories = categories.length;
+    const { startX, y } = this.config.spine;
+
+    // 大骨の数に応じて背骨の長さを動的に計算
+    const spineEndX = this.calculateSpineEndX(numCategories);
+    const totalWidth = spineEndX - startX;
 
     const positions = [];
 
-    // 4M配置: 機械(上左)、人(上右)、材料(下左)、方法(下右)
-    const layout = [
-      { name: '機械', isTop: true, ratio: 0.2 },    // 上側、左から20%
-      { name: '人', isTop: true, ratio: 0.8 },      // 上側、左から80%
-      { name: '材料', isTop: false, ratio: 0.2 },   // 下側、左から20%
-      { name: '方法', isTop: false, ratio: 0.8 }    // 下側、左から80%
-    ];
+    // 上下に均等に配置（上側と下側を交互に）
+    const numTop = Math.ceil(numCategories / 2);
+    const numBottom = Math.floor(numCategories / 2);
+
+    let topIndex = 0;
+    let bottomIndex = 0;
 
     categories.forEach((category, index) => {
-      const config = layout[index] || layout[0];
-      const x = startX + totalWidth * config.ratio;
+      const isTop = index % 2 === 0; // 偶数インデックスは上側
+
+      let ratio;
+      if (isTop) {
+        // 上側の大骨を均等配置
+        ratio = (topIndex + 1) / (numTop + 1);
+        topIndex++;
+      } else {
+        // 下側の大骨を均等配置
+        ratio = (bottomIndex + 1) / (numBottom + 1);
+        bottomIndex++;
+      }
+
+      const x = startX + totalWidth * ratio;
 
       positions.push({
         spineX: x,
         spineY: y,
-        isTop: config.isTop,
+        isTop: isTop,
         name: category.name
       });
     });
 
     return positions;
+  }
+
+  /**
+   * 大骨の数に応じて背骨の終点X座標を計算
+   * @param {number} numCategories - カテゴリー数
+   * @returns {number} 背骨の終点X座標
+   */
+  calculateSpineEndX(numCategories) {
+    // 基準: 4M = 1600px
+    // 3M以下 = 1400px
+    // 5M = 1750px
+    // 6M以上 = 1850px
+    const baseEndX = 1600;
+    const increment = 150; // 1つ増えるごとに150px延長
+
+    if (numCategories <= 3) {
+      return 1400;
+    } else if (numCategories === 4) {
+      return baseEndX;
+    } else if (numCategories === 5) {
+      return 1750;
+    } else {
+      // 6M以上
+      return 1850;
+    }
+  }
+
+  /**
+   * 効果ボックスのX座標を動的に計算
+   * @returns {number} 効果ボックスのX座標
+   */
+  calculateEffectX() {
+    const numCategories = this.data.categories.length;
+    const spineEndX = this.calculateSpineEndX(numCategories);
+    return spineEndX + 150; // 背骨の終点から150px右
   }
 
   /**
