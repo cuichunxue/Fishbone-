@@ -12,7 +12,7 @@ class IshikawaDiagram {
     this.offset = { x: 0, y: 0 };
 
     // ズーム・パン用
-    this.viewBox = { x: 0, y: 0, width: 2000, height: 1000 };
+    this.viewBox = { x: 0, y: 0, width: 1900, height: 1000 };
     this.isPanning = false;
     this.panStart = { x: 0, y: 0 };
     this.zoomLevel = 1;
@@ -23,14 +23,14 @@ class IshikawaDiagram {
 
     // 描画設定
     this.config = {
-      width: 2000,
+      width: 1900,
       height: 1000,
       margin: { left: 50, right: 50, top: 50, bottom: 50 },
 
       // 背骨（主骨）設定
       spine: {
         startX: 100,
-        endX: 1650,
+        endX: 1600,
         y: 500,
         strokeWidth: 4,
         color: '#2c3e50'
@@ -38,7 +38,7 @@ class IshikawaDiagram {
 
       // 特性ボックス設定（縦書き縦長）
       effect: {
-        x: 1800,
+        x: 1750,
         y: 250,
         width: 80,
         height: 500,
@@ -61,7 +61,7 @@ class IshikawaDiagram {
 
       // 中骨設定
       mediumBone: {
-        length: 250,
+        length: 260,
         strokeWidth: 2,
         color: '#7f8c8d',
         spacing: 50,
@@ -332,8 +332,8 @@ class IshikawaDiagram {
     const { length, strokeWidth, color, fontSize, spacing } = this.config.mediumBone;
 
     causes.forEach((cause, index) => {
-      // 中骨の終点を大骨上に配置（背骨から離し、広い間隔で配置）
-      const t = 0.22 + index * 0.20; // 大骨上の位置（0.22, 0.42, 0.62, 0.82）
+      // 中骨の終点を大骨上に配置（均等間隔で配置）
+      const t = 0.18 + index * 0.22; // 大骨上の位置（0.18, 0.40, 0.62, 0.84）
       const endX = spinePos.spineX - (spinePos.spineX - boneEndX) * t;
       const endY = isTop
         ? spinePos.spineY - (spinePos.spineY - boneEndY) * t
@@ -787,7 +787,7 @@ class IshikawaDiagram {
    * ビューをリセット（ダブルクリック）
    */
   resetView() {
-    this.viewBox = { x: 0, y: 0, width: 2000, height: 1000 };
+    this.viewBox = { x: 0, y: 0, width: 1900, height: 1000 };
     this.zoomLevel = 1;
     this.updateViewBox();
   }
