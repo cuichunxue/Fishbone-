@@ -12,19 +12,19 @@ const config = {
   spineStartX: 100,
   spineY: 500,
 
-  // 背骨の長さ（SVG幅の88%に最適化）
-  spineEndX: Math.round(2100 * 0.88), // 1848
+  // 背骨の長さ（SVG幅の90%に最適化）
+  spineEndX: Math.round(2100 * 0.90), // 1890
 
   // 効果ボックス（スペース完全最小化）
   effectOffsetFromSpine: 50,
   effectBoxWidth: 80,
 
-  // 大骨（見栄えを良くするため延長）
-  majorBoneLength: 600,
+  // 大骨（さらに見栄えを良くするため延長）
+  majorBoneLength: 650,
   majorBoneAngle: 60, // 度
 
-  // 中骨（さらに短縮で干渉完全防止）
-  mediumBoneLength: 100,
+  // 中骨（見栄えを良くするため少し延長）
+  mediumBoneLength: 130,
 
   // 小骨
   smallBoneLength: 90,
