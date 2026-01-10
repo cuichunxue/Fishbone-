@@ -3,28 +3,28 @@
  * 4Mサンプルデータでの実際の座標を計算して干渉を検証
  */
 
-// 調整後の設定値
+// 最終調整後の設定値（バランス最適化）
 const config = {
   numCategories: 4,
 
-  // SVG（拡大）
-  svgWidth: 2000,
+  // SVG（全体最適化）
+  svgWidth: 1800,
   spineStartX: 100,
   spineY: 500,
 
-  // 背骨の長さ（SVG幅の85%に調整）
-  spineEndX: Math.round(2000 * 0.85), // 1700
+  // 背骨の長さ（SVG幅の83%に最適化）
+  spineEndX: Math.round(1800 * 0.83), // 1494
 
-  // 効果ボックス（距離拡大）
-  effectOffsetFromSpine: 150,
+  // 効果ボックス（スペース最小化）
+  effectOffsetFromSpine: 80,
   effectBoxWidth: 80,
 
   // 大骨
   majorBoneLength: 550,
   majorBoneAngle: 60, // 度
 
-  // 中骨（大幅短縮）
-  mediumBoneLength: 180,
+  // 中骨（さらに短縮で干渉完全防止）
+  mediumBoneLength: 150,
 
   // 小骨
   smallBoneLength: 90,
