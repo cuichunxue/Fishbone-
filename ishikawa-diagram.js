@@ -21,6 +21,10 @@ class IshikawaDiagram {
     this.touches = [];
     this.lastTouchDistance = 0;
 
+    // レスポンシブ対応用
+    this.resizeObserver = null;
+    this.resizeTimeout = null;
+
     // 描画設定
     this.config = {
       width: 1900,
@@ -100,12 +104,14 @@ class IshikawaDiagram {
     // SVG要素を作成
     this.svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     this.svg.setAttribute('width', '100%');
-    this.svg.setAttribute('height', '700');
+    this.svg.setAttribute('height', '100%');
     this.svg.setAttribute('viewBox', `${this.viewBox.x} ${this.viewBox.y} ${this.viewBox.width} ${this.viewBox.height}`);
+    this.svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
     this.svg.style.border = '1px solid #ddd';
     this.svg.style.backgroundColor = '#ffffff';
     this.svg.style.cursor = 'default';
     this.svg.style.touchAction = 'none'; // タッチ操作を完全制御
+    this.svg.style.maxHeight = '100vh'; // ビューポートの高さを超えない
 
     // メインコンテンツグループ
     this.mainGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -115,6 +121,9 @@ class IshikawaDiagram {
 
     // マウスイベントを設定
     this.setupEventListeners();
+
+    // レスポンシブ対応を設定
+    this.setupResponsive();
   }
 
   /**
@@ -798,6 +807,79 @@ class IshikawaDiagram {
   updateViewBox() {
     this.svg.setAttribute('viewBox',
       `${this.viewBox.x} ${this.viewBox.y} ${this.viewBox.width} ${this.viewBox.height}`);
+  }
+
+  /**
+   * レスポンシブ対応を設定
+   */
+  setupResponsive() {
+    // ResizeObserverでコンテナサイズの変更を監視
+    if (typeof ResizeObserver !== 'undefined') {
+      this.resizeObserver = new ResizeObserver(entries => {
+        // デバウンス処理（連続したリサイズイベントを制限）
+        if (this.resizeTimeout) {
+          clearTimeout(this.resizeTimeout);
+        }
+        this.resizeTimeout = setTimeout(() => {
+          this.handleResize();
+        }, 100);
+      });
+      this.resizeObserver.observe(this.container);
+    }
+
+    // ウィンドウリサイズイベント（フォールバック）
+    window.addEventListener('resize', () => {
+      if (this.resizeTimeout) {
+        clearTimeout(this.resizeTimeout);
+      }
+      this.resizeTimeout = setTimeout(() => {
+        this.handleResize();
+      }, 100);
+    });
+
+    // 初回サイズ調整
+    this.handleResize();
+  }
+
+  /**
+   * リサイズ処理
+   */
+  handleResize() {
+    if (!this.svg || !this.container) return;
+
+    const containerWidth = this.container.clientWidth;
+    const aspectRatio = this.config.width / this.config.height; // 1900 / 1000 = 1.9
+
+    // コンテナの幅に基づいて高さを計算
+    let svgHeight = containerWidth / aspectRatio;
+
+    // ビューポートの高さを超えないように制限
+    const maxHeight = window.innerHeight * 0.9; // ビューポートの90%まで
+    if (svgHeight > maxHeight) {
+      svgHeight = maxHeight;
+    }
+
+    // SVGの高さを設定（最小値500px、最大値1000px）
+    const finalHeight = Math.max(500, Math.min(svgHeight, 1000));
+    this.svg.style.height = `${finalHeight}px`;
+
+    // 小さい画面では初期ズームを調整
+    if (containerWidth < 768) {
+      // モバイルデバイス: ズームアウトして全体を表示
+      this.svg.style.height = `${Math.min(finalHeight, 600)}px`;
+    }
+  }
+
+  /**
+   * リソースをクリーンアップ
+   */
+  destroy() {
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+    }
+    if (this.resizeTimeout) {
+      clearTimeout(this.resizeTimeout);
+    }
   }
 
   /**
