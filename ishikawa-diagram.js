@@ -362,12 +362,12 @@ class IshikawaDiagram {
    * @returns {number} 中骨の長さ
    */
   calculateMediumBoneLength(numCategories) {
-    // 基準: 4M = 130px（見栄え改善のため延長）
+    // 基準: 4M = 150px（さらに見栄え改善のため延長）
     // 大骨が多いほど少し短くする
     if (numCategories <= 3) {
-      return 140;
+      return 160;
     } else if (numCategories === 4) {
-      return 130;
+      return 150;
     } else if (numCategories === 5) {
       return 105;
     } else if (numCategories === 6) {
@@ -385,7 +385,7 @@ class IshikawaDiagram {
   calculateEffectX() {
     const numCategories = this.data.categories.length;
     const spineEndX = this.calculateSpineEndX(numCategories);
-    return spineEndX + 10; // 背骨の終点から10px右（赤枠のスペース最小化）
+    return spineEndX + 5; // 背骨の終点から5px右（完全密着）
   }
 
   /**
