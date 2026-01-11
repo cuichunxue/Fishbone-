@@ -306,20 +306,20 @@ class IshikawaDiagram {
    * @returns {number} SVG幅
    */
   calculateSVGWidth(numCategories) {
-    // 基準: 4M = 2100px（全体バランス最適化）
+    // 基準: 4M = 2300px（干渉解消のため拡大）
     if (numCategories <= 2) {
-      return 1700;
-    } else if (numCategories === 3) {
       return 1900;
-    } else if (numCategories === 4) {
+    } else if (numCategories === 3) {
       return 2100;
-    } else if (numCategories === 5) {
+    } else if (numCategories === 4) {
       return 2300;
-    } else if (numCategories === 6) {
+    } else if (numCategories === 5) {
       return 2500;
+    } else if (numCategories === 6) {
+      return 2700;
     } else {
       // 7M以上: 大骨1つ増えるごとに200px追加
-      return 2500 + (numCategories - 6) * 200;
+      return 2700 + (numCategories - 6) * 200;
     }
   }
 
@@ -329,9 +329,9 @@ class IshikawaDiagram {
    * @returns {number} 背骨の終点X座標
    */
   calculateSpineEndX(numCategories) {
-    // SVG幅の約90%を背骨の長さとする（効果ボックスに近づける）
+    // SVG幅の約86%を背骨の長さとする（効果ボックスとのバランス改善）
     const svgWidth = this.calculateSVGWidth(numCategories);
-    return Math.round(svgWidth * 0.90);
+    return Math.round(svgWidth * 0.86);
   }
 
   /**
@@ -362,19 +362,19 @@ class IshikawaDiagram {
    * @returns {number} 中骨の長さ
    */
   calculateMediumBoneLength(numCategories) {
-    // 基準: 4M = 130px（見栄えを良くするため少し延長）
+    // 基準: 4M = 110px（干渉解消のため短縮）
     // 大骨が多いほど少し短くする
     if (numCategories <= 3) {
-      return 140;
-    } else if (numCategories === 4) {
-      return 130;
-    } else if (numCategories === 5) {
-      return 125;
-    } else if (numCategories === 6) {
       return 120;
+    } else if (numCategories === 4) {
+      return 110;
+    } else if (numCategories === 5) {
+      return 105;
+    } else if (numCategories === 6) {
+      return 100;
     } else {
       // 7M以上
-      return Math.max(100, 120 - (numCategories - 6) * 5);
+      return Math.max(80, 100 - (numCategories - 6) * 5);
     }
   }
 
@@ -385,7 +385,7 @@ class IshikawaDiagram {
   calculateEffectX() {
     const numCategories = this.data.categories.length;
     const spineEndX = this.calculateSpineEndX(numCategories);
-    return spineEndX + 50; // 背骨の終点から50px右（スペース完全最小化、矢印が見える最小限）
+    return spineEndX + 30; // 背骨の終点から30px右（赤丸の位置に近づける）
   }
 
   /**
