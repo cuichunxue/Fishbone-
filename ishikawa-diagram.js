@@ -1,97 +1,158 @@
 /**
- * 石川ダイアグラム（特性要因図）描画エンジン v3.0
- * 本格的な配置アルゴリズムと干渉回避システムを実装
+ * 石川ダイアグラム（特性要因図）描画エンジン v4.0
+ * 実務で使用できる品質を目指した完全再設計版
  */
 class IshikawaDiagram {
   constructor(containerId) {
     this.container = document.getElementById(containerId);
     this.svg = null;
     this.data = null;
-    this.elements = [];
-    this.draggingElement = null;
-    this.offset = { x: 0, y: 0 };
 
-    // ズーム・パン用
-    this.viewBox = { x: 0, y: 0, width: 1600, height: 900 };
+    // ズーム・パン
+    this.viewBox = { x: 0, y: 0, width: 1400, height: 800 };
     this.isPanning = false;
     this.panStart = { x: 0, y: 0 };
     this.zoomLevel = 1;
 
-    // タッチ操作用
+    // ドラッグ
+    this.draggingElement = null;
+    this.offset = { x: 0, y: 0 };
+
+    // タッチ
     this.touches = [];
     this.lastTouchDistance = 0;
+  }
 
-    // レスポンシブ対応用
-    this.resizeObserver = null;
-    this.resizeTimeout = null;
+  /**
+   * 描画メイン
+   */
+  render(data) {
+    this.data = data;
 
-    // 描画設定
-    this.config = {
-      // 背骨設定
-      spine: {
-        strokeWidth: 5,
-        color: '#1a252f',
-        arrowSize: 18
-      },
+    // レイアウト計算
+    const layout = this.computeLayout(data);
 
-      // 特性ボックス設定
-      effect: {
-        width: 80,
-        fontSize: 18,
-        fontWeight: 'bold',
-        bgColor: '#c0392b',
-        textColor: '#ffffff',
-        borderRadius: 8
-      },
+    // SVG初期化
+    this.initSVG(layout.width, layout.height);
 
-      // 大骨設定
-      majorBone: {
-        angle: 60,
-        strokeWidth: 3.5,
-        color: '#2c3e50',
-        arrowSize: 12,
-        boxPadding: { x: 14, y: 8 },
-        fontSize: 14,
-        fontWeight: 'bold',
-        boxColor: '#2980b9',
-        textColor: '#ffffff'
-      },
+    // 描画
+    this.drawSpine(layout);
+    this.drawEffectBox(layout);
 
-      // 中骨設定
-      mediumBone: {
-        strokeWidth: 2.2,
-        color: '#5d6d7e',
-        arrowSize: 8,
-        fontSize: 12,
-        fontWeight: '600',
-        textColor: '#2c3e50'
-      },
+    // カテゴリーを描画
+    layout.categories.forEach(cat => {
+      this.drawMajorBone(cat, layout);
+    });
+  }
 
-      // 小骨設定
-      smallBone: {
-        angle: 60,
-        strokeWidth: 1.6,
-        color: '#7f8c8d',
-        arrowSize: 6,
-        fontSize: 11,
-        textColor: '#34495e'
-      },
+  /**
+   * レイアウト計算 - 干渉を避けるための配置アルゴリズム
+   */
+  computeLayout(data) {
+    const categories = data.categories;
+    const n = categories.length;
 
-      // 孫骨設定
-      tinyBone: {
-        strokeWidth: 1.2,
-        color: '#95a5a6',
-        arrowSize: 5,
-        fontSize: 10,
-        textColor: '#5d6d7e'
+    // 各カテゴリーの中骨数を取得
+    const causeCounts = categories.map(c => c.causes.length);
+    const maxCauses = Math.max(...causeCounts, 1);
+
+    // キャンバスサイズ
+    const width = Math.max(1400, 1200 + n * 80);
+    const height = Math.max(800, 700 + maxCauses * 25);
+
+    // 背骨
+    const spineY = height / 2;
+    const spineStartX = 60;
+    const spineEndX = width - 120;
+    const spineLength = spineEndX - spineStartX;
+
+    // カテゴリーを上下に分ける
+    const topCats = [];
+    const bottomCats = [];
+    for (let i = 0; i < n; i++) {
+      if (i % 2 === 0) {
+        topCats.push({ cat: categories[i], idx: i });
+      } else {
+        bottomCats.push({ cat: categories[i], idx: i });
       }
+    }
+
+    // 大骨の配置計算
+    const angleRad = (60 * Math.PI) / 180;
+
+    // 利用可能な垂直スペース
+    const topSpace = spineY - 50;
+    const bottomSpace = height - spineY - 50;
+
+    // 大骨の長さ（垂直成分がスペースに収まるように）
+    const majorBoneLength = Math.min(
+      topSpace / Math.sin(angleRad) * 0.85,
+      bottomSpace / Math.sin(angleRad) * 0.85,
+      250
+    );
+
+    // 水平方向の大骨投影長
+    const majorBoneHorizProj = majorBoneLength * Math.cos(angleRad);
+
+    // カテゴリー間の最小間隔
+    const minSpacing = majorBoneHorizProj * 2.2;
+
+    // 上下それぞれの配置位置を計算
+    const computePositions = (cats, isTop) => {
+      const count = cats.length;
+      if (count === 0) return [];
+
+      // 均等配置
+      const totalSpan = spineLength - minSpacing;
+      const spacing = count > 1 ? totalSpan / (count - 1) : 0;
+      const startX = spineStartX + minSpacing / 2;
+
+      return cats.map((item, i) => {
+        const x = count === 1 ? spineStartX + spineLength / 2 : startX + spacing * i;
+        return {
+          category: item.cat,
+          originalIndex: item.idx,
+          spineX: x,
+          isTop: isTop,
+          endX: x - majorBoneLength * Math.cos(angleRad),
+          endY: spineY + (isTop ? -1 : 1) * majorBoneLength * Math.sin(angleRad)
+        };
+      });
+    };
+
+    const topPositions = computePositions(topCats, true);
+    const bottomPositions = computePositions(bottomCats, false);
+
+    // 中骨の長さ（カテゴリー間隔の半分以下）
+    const catSpacing = topCats.length > 1
+      ? (spineLength - minSpacing) / (topCats.length - 1)
+      : spineLength / 2;
+    const mediumBoneLength = Math.min(catSpacing * 0.35, majorBoneLength * 0.4, 90);
+
+    // 小骨・孫骨の長さ
+    const smallBoneLength = Math.min(mediumBoneLength * 0.5, 45);
+    const tinyBoneLength = Math.min(smallBoneLength * 0.6, 30);
+
+    return {
+      width,
+      height,
+      spineY,
+      spineStartX,
+      spineEndX,
+      spineLength,
+      majorBoneLength,
+      majorBoneAngle: 60,
+      mediumBoneLength,
+      smallBoneLength,
+      tinyBoneLength,
+      categories: [...topPositions, ...bottomPositions].sort((a, b) => a.originalIndex - b.originalIndex)
     };
   }
 
   /**
-   * ダイアグラムを初期化
+   * SVG初期化
    */
-  initialize(width, height) {
+  initSVG(width, height) {
     this.container.innerHTML = '';
 
     this.svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -100,645 +161,436 @@ class IshikawaDiagram {
     this.svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
     this.svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
     this.svg.style.backgroundColor = '#ffffff';
-    this.svg.style.cursor = 'default';
     this.svg.style.touchAction = 'none';
 
     this.viewBox = { x: 0, y: 0, width, height };
 
-    // グラデーション定義
-    this.createDefs();
+    // defs
+    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+    const filter = document.createElementNS('http://www.w3.org/2000/svg', 'filter');
+    filter.setAttribute('id', 'shadow');
+    filter.innerHTML = '<feDropShadow dx="1" dy="1" stdDeviation="2" flood-opacity="0.2"/>';
+    defs.appendChild(filter);
+    this.svg.appendChild(defs);
 
-    // メインコンテンツグループ
+    // メイングループ
     this.mainGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     this.svg.appendChild(this.mainGroup);
 
     this.container.appendChild(this.svg);
-
-    this.setupEventListeners();
-    this.setupResponsive();
+    this.setupEvents();
   }
 
   /**
-   * SVGの定義
-   */
-  createDefs() {
-    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-
-    const filter = document.createElementNS('http://www.w3.org/2000/svg', 'filter');
-    filter.setAttribute('id', 'dropShadow');
-    filter.setAttribute('x', '-20%');
-    filter.setAttribute('y', '-20%');
-    filter.setAttribute('width', '140%');
-    filter.setAttribute('height', '140%');
-
-    const feDropShadow = document.createElementNS('http://www.w3.org/2000/svg', 'feDropShadow');
-    feDropShadow.setAttribute('dx', '2');
-    feDropShadow.setAttribute('dy', '2');
-    feDropShadow.setAttribute('stdDeviation', '2');
-    feDropShadow.setAttribute('flood-color', 'rgba(0,0,0,0.15)');
-
-    filter.appendChild(feDropShadow);
-    defs.appendChild(filter);
-    this.svg.appendChild(defs);
-  }
-
-  /**
-   * データを描画
-   */
-  render(data) {
-    this.data = data;
-    this.elements = [];
-
-    // レイアウトを計算
-    const layout = this.calculateLayout(data);
-
-    // 初期化
-    this.initialize(layout.width, layout.height);
-
-    // 描画順序：背骨 → 効果ボックス → カテゴリー
-    this.drawSpine(layout);
-    this.drawEffectBox(layout);
-    this.drawCategories(layout);
-  }
-
-  /**
-   * レイアウト計算（配置アルゴリズムのコア）
-   */
-  calculateLayout(data) {
-    const categories = data.categories;
-    const numCategories = categories.length;
-
-    // 各カテゴリーの複雑度を分析
-    const categoryComplexities = categories.map(cat => {
-      let complexity = cat.causes.length;
-      cat.causes.forEach(cause => {
-        complexity += cause.subcauses.length * 0.5;
-        cause.subcauses.forEach(sub => {
-          complexity += sub.details.length * 0.25;
-        });
-      });
-      return complexity;
-    });
-
-    const maxComplexity = Math.max(...categoryComplexities, 1);
-    const totalComplexity = categoryComplexities.reduce((a, b) => a + b, 0);
-
-    // キャンバスサイズを計算
-    const baseWidth = 1400;
-    const baseHeight = 800;
-    const width = Math.max(baseWidth, baseWidth + (numCategories - 4) * 150);
-    const height = Math.max(baseHeight, baseHeight + (maxComplexity - 3) * 30);
-
-    // マージン設定
-    const margin = {
-      left: 80,
-      right: 160,
-      top: 80,
-      bottom: 80
-    };
-
-    // 背骨の位置
-    const spineY = height / 2;
-    const spineStartX = margin.left;
-    const spineEndX = width - margin.right;
-    const spineLength = spineEndX - spineStartX;
-
-    // 効果ボックスの位置
-    const effectBoxX = spineEndX + 15;
-    const effectBoxHeight = Math.min(height - margin.top - margin.bottom, 400);
-
-    // カテゴリーを上下に分割
-    const topCategories = [];
-    const bottomCategories = [];
-
-    categories.forEach((cat, i) => {
-      const catData = {
-        category: cat,
-        index: i,
-        complexity: categoryComplexities[i]
-      };
-      if (i % 2 === 0) {
-        topCategories.push(catData);
-      } else {
-        bottomCategories.push(catData);
-      }
-    });
-
-    // 大骨の長さを計算（干渉を避けるため）
-    const verticalSpace = (height / 2) - margin.top - 30;
-    const numTopCats = topCategories.length;
-    const numBottomCats = bottomCategories.length;
-    const maxCatsInRow = Math.max(numTopCats, numBottomCats, 1);
-
-    // カテゴリー間の最小間隔
-    const minCategorySpacing = spineLength / (maxCatsInRow + 1);
-
-    // 大骨の長さ（垂直方向の利用可能スペースに基づく）
-    const majorBoneLength = Math.min(
-      verticalSpace * 0.9,
-      minCategorySpacing * 0.7,
-      280
-    );
-
-    // 中骨の長さ
-    const mediumBoneLength = Math.min(majorBoneLength * 0.35, 100);
-
-    // 小骨の長さ
-    const smallBoneLength = Math.min(mediumBoneLength * 0.55, 55);
-
-    // 孫骨の長さ
-    const tinyBoneLength = Math.min(smallBoneLength * 0.6, 35);
-
-    // カテゴリーの位置を計算
-    const calculateCategoryPositions = (cats, isTop) => {
-      const numCats = cats.length;
-      if (numCats === 0) return [];
-
-      const positions = [];
-      const spacing = spineLength / (numCats + 1);
-
-      cats.forEach((catData, idx) => {
-        const x = spineStartX + spacing * (idx + 1);
-        positions.push({
-          ...catData,
-          spineX: x,
-          isTop
-        });
-      });
-
-      return positions;
-    };
-
-    const topPositions = calculateCategoryPositions(topCategories, true);
-    const bottomPositions = calculateCategoryPositions(bottomCategories, false);
-
-    return {
-      width,
-      height,
-      margin,
-      spineY,
-      spineStartX,
-      spineEndX,
-      spineLength,
-      effectBoxX,
-      effectBoxHeight,
-      majorBoneLength,
-      mediumBoneLength,
-      smallBoneLength,
-      tinyBoneLength,
-      topCategories: topPositions,
-      bottomCategories: bottomPositions,
-      allCategories: [...topPositions, ...bottomPositions]
-    };
-  }
-
-  /**
-   * 背骨を描画
+   * 背骨描画
    */
   drawSpine(layout) {
     const { spineStartX, spineEndX, spineY } = layout;
-    const { strokeWidth, color, arrowSize } = this.config.spine;
 
-    const line = this.createLine(spineStartX, spineY, spineEndX, spineY, strokeWidth, color);
-    this.mainGroup.appendChild(line);
-
-    const arrow = this.createArrowhead(spineEndX, spineY, 0, arrowSize, color);
-    this.mainGroup.appendChild(arrow);
-  }
-
-  /**
-   * 効果ボックスを描画
-   */
-  drawEffectBox(layout) {
-    const { effectBoxX, spineY, effectBoxHeight } = layout;
-    const { width, fontSize, fontWeight, bgColor, textColor, borderRadius } = this.config.effect;
-
-    const boxY = spineY - effectBoxHeight / 2;
-
-    const group = this.createGroup();
-
-    // ボックス
-    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    rect.setAttribute('x', effectBoxX);
-    rect.setAttribute('y', boxY);
-    rect.setAttribute('width', width);
-    rect.setAttribute('height', effectBoxHeight);
-    rect.setAttribute('fill', bgColor);
-    rect.setAttribute('rx', borderRadius);
-    rect.setAttribute('filter', 'url(#dropShadow)');
-    group.appendChild(rect);
-
-    // 縦書きテキスト
-    const text = this.data.effect;
-    const charSpacing = fontSize + 4;
-    const maxChars = Math.floor((effectBoxHeight - 40) / charSpacing);
-    const chars = text.split('');
-
-    const startY = boxY + 30;
-    const centerX = effectBoxX + width / 2;
-
-    chars.slice(0, maxChars).forEach((char, i) => {
-      const charEl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-      charEl.setAttribute('x', centerX);
-      charEl.setAttribute('y', startY + i * charSpacing);
-      charEl.setAttribute('font-size', fontSize);
-      charEl.setAttribute('font-weight', fontWeight);
-      charEl.setAttribute('fill', textColor);
-      charEl.setAttribute('text-anchor', 'middle');
-      charEl.setAttribute('dominant-baseline', 'middle');
-      charEl.textContent = char;
-      group.appendChild(charEl);
-    });
-
-    this.makeGroupDraggable(group, 'effect');
-    this.mainGroup.appendChild(group);
-  }
-
-  /**
-   * 全カテゴリーを描画
-   */
-  drawCategories(layout) {
-    layout.allCategories.forEach(catPos => {
-      this.drawCategory(catPos, layout);
-    });
-  }
-
-  /**
-   * カテゴリー（大骨）を描画
-   */
-  drawCategory(catPos, layout) {
-    const { category, spineX, isTop } = catPos;
-    const { spineY, majorBoneLength } = layout;
-    const { angle, strokeWidth, color, arrowSize, boxPadding, fontSize, fontWeight, boxColor, textColor } = this.config.majorBone;
-
-    const rad = (angle * Math.PI) / 180;
-    const direction = isTop ? -1 : 1;
-
-    // 大骨の終点（カテゴリーボックスの位置）
-    const endX = spineX - majorBoneLength * Math.cos(rad);
-    const endY = spineY + direction * majorBoneLength * Math.sin(rad);
-
-    // 大骨の線
-    const line = this.createLine(spineX, spineY, endX, endY, strokeWidth, color);
+    // 線
+    const line = this.line(spineStartX, spineY, spineEndX, spineY, 5, '#1a252f');
     this.mainGroup.appendChild(line);
 
     // 矢印
+    const arrow = this.arrow(spineEndX, spineY, 0, 16, '#1a252f');
+    this.mainGroup.appendChild(arrow);
+  }
+
+  /**
+   * 効果ボックス描画
+   */
+  drawEffectBox(layout) {
+    const { spineEndX, spineY, height } = layout;
+
+    const boxW = 70;
+    const boxH = Math.min(height * 0.45, 350);
+    const boxX = spineEndX + 12;
+    const boxY = spineY - boxH / 2;
+
+    const g = this.group();
+
+    // 背景
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('x', boxX);
+    rect.setAttribute('y', boxY);
+    rect.setAttribute('width', boxW);
+    rect.setAttribute('height', boxH);
+    rect.setAttribute('fill', '#c0392b');
+    rect.setAttribute('rx', '6');
+    rect.setAttribute('filter', 'url(#shadow)');
+    g.appendChild(rect);
+
+    // 縦書きテキスト
+    const text = this.data.effect;
+    const fontSize = 16;
+    const lineHeight = fontSize + 3;
+    const maxChars = Math.floor((boxH - 30) / lineHeight);
+
+    text.split('').slice(0, maxChars).forEach((char, i) => {
+      const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      t.setAttribute('x', boxX + boxW / 2);
+      t.setAttribute('y', boxY + 25 + i * lineHeight);
+      t.setAttribute('font-size', fontSize);
+      t.setAttribute('font-weight', 'bold');
+      t.setAttribute('fill', 'white');
+      t.setAttribute('text-anchor', 'middle');
+      t.setAttribute('dominant-baseline', 'middle');
+      t.textContent = char;
+      g.appendChild(t);
+    });
+
+    this.makeDraggable(g);
+    this.mainGroup.appendChild(g);
+  }
+
+  /**
+   * 大骨描画
+   */
+  drawMajorBone(catData, layout) {
+    const { category, spineX, isTop, endX, endY } = catData;
+    const { spineY, mediumBoneLength, smallBoneLength, tinyBoneLength, majorBoneAngle } = layout;
+
+    // 大骨の線
+    const line = this.line(spineX, spineY, endX, endY, 3, '#2c3e50');
+    this.mainGroup.appendChild(line);
+
+    // 矢印（背骨側）
     const arrowAngle = Math.atan2(spineY - endY, spineX - endX) * 180 / Math.PI;
-    const arrow = this.createArrowhead(spineX, spineY, arrowAngle, arrowSize, color);
+    const arrow = this.arrow(spineX, spineY, arrowAngle, 10, '#2c3e50');
     this.mainGroup.appendChild(arrow);
 
     // カテゴリーボックス
-    const textWidth = this.estimateTextWidth(category.name, fontSize);
-    const boxWidth = textWidth + boxPadding.x * 2;
-    const boxHeight = fontSize + boxPadding.y * 2;
-
-    const group = this.createGroup();
+    const boxG = this.group();
+    const textW = this.textWidth(category.name, 13);
+    const boxW = textW + 20;
+    const boxH = 26;
 
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    rect.setAttribute('x', endX - boxWidth / 2);
-    rect.setAttribute('y', endY - boxHeight / 2);
-    rect.setAttribute('width', boxWidth);
-    rect.setAttribute('height', boxHeight);
-    rect.setAttribute('fill', boxColor);
-    rect.setAttribute('rx', 5);
-    rect.setAttribute('filter', 'url(#dropShadow)');
-    group.appendChild(rect);
+    rect.setAttribute('x', endX - boxW / 2);
+    rect.setAttribute('y', endY - boxH / 2);
+    rect.setAttribute('width', boxW);
+    rect.setAttribute('height', boxH);
+    rect.setAttribute('fill', '#2980b9');
+    rect.setAttribute('rx', '4');
+    rect.setAttribute('filter', 'url(#shadow)');
+    boxG.appendChild(rect);
 
-    const text = this.createText(endX, endY, category.name, fontSize, fontWeight, textColor, 'middle');
-    group.appendChild(text);
+    const text = this.text(endX, endY, category.name, 13, 'bold', 'white', 'middle');
+    boxG.appendChild(text);
 
-    this.makeGroupDraggable(group, 'category', category);
-    this.mainGroup.appendChild(group);
+    this.makeDraggable(boxG);
+    this.mainGroup.appendChild(boxG);
 
     // 中骨を描画
-    this.drawCauses(category.causes, {
-      boneStartX: spineX,
-      boneStartY: spineY,
-      boneEndX: endX,
-      boneEndY: endY,
+    this.drawMediumBones(category.causes, {
+      majorStartX: spineX,
+      majorStartY: spineY,
+      majorEndX: endX,
+      majorEndY: endY,
       isTop,
-      layout
+      mediumBoneLength,
+      smallBoneLength,
+      tinyBoneLength,
+      majorBoneAngle
     });
   }
 
   /**
-   * 中骨を描画
+   * 中骨描画 - 全て大骨から外側方向に伸ばす
    */
-  drawCauses(causes, params) {
-    const { boneStartX, boneStartY, boneEndX, boneEndY, isTop, layout } = params;
-    const { mediumBoneLength } = layout;
-    const { strokeWidth, color, arrowSize, fontSize, fontWeight, textColor } = this.config.mediumBone;
+  drawMediumBones(causes, params) {
+    const { majorStartX, majorStartY, majorEndX, majorEndY, isTop,
+            mediumBoneLength, smallBoneLength, tinyBoneLength, majorBoneAngle } = params;
 
-    const numCauses = causes.length;
-    if (numCauses === 0) return;
+    const n = causes.length;
+    if (n === 0) return;
 
-    // 大骨に沿って均等に配置（両端に余白を確保）
-    const startRatio = 0.15;
-    const endRatio = 0.90;
+    // 大骨の方向ベクトル
+    const dx = majorEndX - majorStartX;
+    const dy = majorEndY - majorStartY;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    const ux = dx / len;
+    const uy = dy / len;
 
-    causes.forEach((cause, idx) => {
-      // 配置位置を計算
-      const t = numCauses === 1
-        ? 0.5
-        : startRatio + (endRatio - startRatio) * (idx / (numCauses - 1));
+    // 中骨の方向（大骨に垂直、外側向き）
+    // 上側カテゴリーなら上向き、下側なら下向き
+    const perpX = -uy;
+    const perpY = ux;
+    const sign = isTop ? -1 : 1;
+    const mediumDirX = perpX * sign;
+    const mediumDirY = perpY * sign;
 
-      const attachX = boneStartX + (boneEndX - boneStartX) * t;
-      const attachY = boneStartY + (boneEndY - boneStartY) * t;
+    causes.forEach((cause, i) => {
+      // 大骨上の位置（先端付近を避ける）
+      const t = n === 1 ? 0.5 : 0.15 + 0.7 * (i / (n - 1));
+      const attachX = majorStartX + dx * t;
+      const attachY = majorStartY + dy * t;
 
-      // 交互に左右に配置
-      const isRight = idx % 2 === 0;
-      const horizDir = isRight ? 1 : -1;
-
-      // 中骨の終点（水平）
-      const startX = attachX + horizDir * mediumBoneLength;
-      const startY = attachY;
+      // 中骨の先端
+      const medEndX = attachX + mediumDirX * mediumBoneLength;
+      const medEndY = attachY + mediumDirY * mediumBoneLength;
 
       // 中骨の線
-      const line = this.createLine(startX, startY, attachX, attachY, strokeWidth, color);
+      const line = this.line(medEndX, medEndY, attachX, attachY, 2, '#5d6d7e');
       this.mainGroup.appendChild(line);
 
       // 矢印
-      const arrowAngle = isRight ? 180 : 0;
-      const arrow = this.createArrowhead(attachX, attachY, arrowAngle, arrowSize, color);
+      const arrowAngle = Math.atan2(attachY - medEndY, attachX - medEndX) * 180 / Math.PI;
+      const arrow = this.arrow(attachX, attachY, arrowAngle, 7, '#5d6d7e');
       this.mainGroup.appendChild(arrow);
 
       // ラベル
-      const labelGroup = this.createGroup();
-      const labelX = startX + (isRight ? 4 : -4);
-      const labelY = startY - 10;
-
-      // 背景
-      const textWidth = this.estimateTextWidth(cause.name, fontSize);
-      const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-      bg.setAttribute('x', isRight ? labelX - 2 : labelX - textWidth - 2);
-      bg.setAttribute('y', labelY - fontSize / 2 - 2);
-      bg.setAttribute('width', textWidth + 4);
-      bg.setAttribute('height', fontSize + 4);
-      bg.setAttribute('fill', 'white');
-      bg.setAttribute('fill-opacity', '0.9');
-      bg.setAttribute('rx', '2');
-      labelGroup.appendChild(bg);
-
-      const labelText = this.createText(labelX, labelY, cause.name, fontSize, fontWeight, textColor, isRight ? 'start' : 'end');
-      labelGroup.appendChild(labelText);
-
-      this.makeGroupDraggable(labelGroup, 'cause', cause);
-      this.mainGroup.appendChild(labelGroup);
+      const labelG = this.group();
+      const labelX = medEndX;
+      const labelY = medEndY + (isTop ? -12 : 16);
+      const labelText = this.text(labelX, labelY, cause.name, 11, '600', '#2c3e50', 'middle');
+      labelG.appendChild(labelText);
+      this.makeDraggable(labelG);
+      this.mainGroup.appendChild(labelG);
 
       // 小骨を描画
-      this.drawSubcauses(cause.subcauses, {
-        causeStartX: startX,
-        causeStartY: startY,
-        causeEndX: attachX,
-        causeEndY: attachY,
-        causeIsRight: isRight,
-        causeIdx: idx,
+      this.drawSmallBones(cause.subcauses, {
+        medStartX: medEndX,
+        medStartY: medEndY,
+        medEndX: attachX,
+        medEndY: attachY,
         isTop,
-        layout
+        smallBoneLength,
+        tinyBoneLength,
+        causeIdx: i
       });
     });
   }
 
   /**
-   * 小骨を描画
+   * 小骨描画
    */
-  drawSubcauses(subcauses, params) {
-    const { causeStartX, causeStartY, causeEndX, causeEndY, causeIsRight, causeIdx, isTop, layout } = params;
-    const { smallBoneLength } = layout;
-    const { angle, strokeWidth, color, arrowSize, fontSize, textColor } = this.config.smallBone;
+  drawSmallBones(subcauses, params) {
+    const { medStartX, medStartY, medEndX, medEndY, isTop, smallBoneLength, tinyBoneLength, causeIdx } = params;
 
-    const numSubcauses = subcauses.length;
-    if (numSubcauses === 0) return;
+    const n = subcauses.length;
+    if (n === 0) return;
 
-    const rad = (angle * Math.PI) / 180;
+    // 中骨の方向
+    const dx = medEndX - medStartX;
+    const dy = medEndY - medStartY;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    const ux = dx / len;
+    const uy = dy / len;
 
-    subcauses.forEach((subcause, idx) => {
+    // 小骨の角度（中骨に対して60度）
+    const angleRad = (55 * Math.PI) / 180;
+
+    subcauses.forEach((sub, i) => {
       // 中骨上の位置
-      const t = (idx + 1) / (numSubcauses + 1);
-      const attachX = causeStartX + (causeEndX - causeStartX) * t;
-      const attachY = causeStartY;
+      const t = (i + 1) / (n + 1);
+      const attachX = medStartX + dx * t;
+      const attachY = medStartY + dy * t;
 
-      // 交互に上下配置（causeIdxも考慮）
-      const isAbove = (idx + causeIdx) % 2 === 0;
-      const vertDir = isAbove ? -1 : 1;
-      const horizDir = causeIsRight ? 1 : -1;
+      // 交互に上下（またはカテゴリー位置を考慮）
+      const altSign = ((i + causeIdx) % 2 === 0) ? 1 : -1;
 
-      // 小骨の終点
-      const startX = attachX + horizDir * smallBoneLength * Math.cos(rad);
-      const startY = attachY + vertDir * smallBoneLength * Math.sin(rad);
+      // 小骨の方向を計算（中骨に対して斜め）
+      const cosA = Math.cos(angleRad * altSign);
+      const sinA = Math.sin(angleRad * altSign);
+      const smallDirX = ux * cosA - uy * sinA;
+      const smallDirY = ux * sinA + uy * cosA;
+
+      const smallEndX = attachX - smallDirX * smallBoneLength;
+      const smallEndY = attachY - smallDirY * smallBoneLength;
 
       // 小骨の線
-      const line = this.createLine(startX, startY, attachX, attachY, strokeWidth, color);
+      const line = this.line(smallEndX, smallEndY, attachX, attachY, 1.5, '#7f8c8d');
       this.mainGroup.appendChild(line);
 
       // 矢印
-      const arrowAngle = Math.atan2(attachY - startY, attachX - startX) * 180 / Math.PI;
-      const arrow = this.createArrowhead(attachX, attachY, arrowAngle, arrowSize, color);
+      const arrowAngle = Math.atan2(attachY - smallEndY, attachX - smallEndX) * 180 / Math.PI;
+      const arrow = this.arrow(attachX, attachY, arrowAngle, 5, '#7f8c8d');
       this.mainGroup.appendChild(arrow);
 
       // ラベル
-      const labelGroup = this.createGroup();
-      const labelY = startY + (isAbove ? -8 : 16);
+      const labelG = this.group();
+      const labelY = smallEndY + (altSign > 0 ? -8 : 14);
+      const labelText = this.text(smallEndX, labelY, sub.name, 10, 'normal', '#34495e', 'middle');
+      labelG.appendChild(labelText);
+      this.makeDraggable(labelG);
+      this.mainGroup.appendChild(labelG);
 
-      const labelText = this.createText(startX, labelY, subcause.name, fontSize, 'normal', textColor, 'middle');
-      labelGroup.appendChild(labelText);
-
-      this.makeGroupDraggable(labelGroup, 'subcause', subcause);
-      this.mainGroup.appendChild(labelGroup);
-
-      // 孫骨を描画
-      this.drawDetails(subcause.details, {
-        subcauseStartX: startX,
-        subcauseStartY: startY,
-        subcauseEndX: attachX,
-        subcauseEndY: attachY,
-        subcauseIdx: idx,
-        causeIsRight,
-        isAbove,
-        layout
+      // 孫骨
+      this.drawTinyBones(sub.details, {
+        smallStartX: smallEndX,
+        smallStartY: smallEndY,
+        smallEndX: attachX,
+        smallEndY: attachY,
+        tinyBoneLength,
+        subIdx: i
       });
     });
   }
 
   /**
-   * 孫骨を描画
+   * 孫骨描画
    */
-  drawDetails(details, params) {
-    const { subcauseStartX, subcauseStartY, subcauseEndX, subcauseEndY, subcauseIdx, causeIsRight, isAbove, layout } = params;
-    const { tinyBoneLength } = layout;
-    const { strokeWidth, color, arrowSize, fontSize, textColor } = this.config.tinyBone;
+  drawTinyBones(details, params) {
+    const { smallStartX, smallStartY, smallEndX, smallEndY, tinyBoneLength, subIdx } = params;
 
-    const numDetails = details.length;
-    if (numDetails === 0) return;
+    const n = details.length;
+    if (n === 0) return;
 
-    details.forEach((detail, idx) => {
+    // 小骨の方向
+    const dx = smallEndX - smallStartX;
+    const dy = smallEndY - smallStartY;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    const ux = dx / len;
+    const uy = dy / len;
+
+    // 孫骨は小骨に垂直
+    const perpX = -uy;
+    const perpY = ux;
+
+    details.forEach((detail, i) => {
       // 小骨上の位置
-      const t = (idx + 1) / (numDetails + 1);
-      const attachX = subcauseStartX + (subcauseEndX - subcauseStartX) * t;
-      const attachY = subcauseStartY + (subcauseEndY - subcauseStartY) * t;
+      const t = (i + 1) / (n + 1);
+      const attachX = smallStartX + dx * t;
+      const attachY = smallStartY + dy * t;
 
-      // 孫骨の方向
-      const horizDir = causeIsRight ? 1 : -1;
-      const startX = attachX + horizDir * tinyBoneLength;
-      const startY = attachY;
+      // 交互
+      const altSign = ((i + subIdx) % 2 === 0) ? 1 : -1;
+
+      const tinyEndX = attachX + perpX * tinyBoneLength * altSign;
+      const tinyEndY = attachY + perpY * tinyBoneLength * altSign;
 
       // 孫骨の線
-      const line = this.createLine(startX, startY, attachX, attachY, strokeWidth, color);
+      const line = this.line(tinyEndX, tinyEndY, attachX, attachY, 1, '#95a5a6');
       this.mainGroup.appendChild(line);
 
       // 矢印
-      const arrowAngle = causeIsRight ? 180 : 0;
-      const arrow = this.createArrowhead(attachX, attachY, arrowAngle, arrowSize, color);
+      const arrowAngle = Math.atan2(attachY - tinyEndY, attachX - tinyEndX) * 180 / Math.PI;
+      const arrow = this.arrow(attachX, attachY, arrowAngle, 4, '#95a5a6');
       this.mainGroup.appendChild(arrow);
 
       // ラベル
-      const labelGroup = this.createGroup();
-      const isAboveLabel = (idx + subcauseIdx) % 2 === 0;
-      const labelX = startX + (causeIsRight ? 3 : -3);
-      const labelY = startY + (isAboveLabel ? -6 : 14);
-
-      const labelText = this.createText(labelX, labelY, detail, fontSize, 'normal', textColor, causeIsRight ? 'start' : 'end');
-      labelGroup.appendChild(labelText);
-
-      this.makeGroupDraggable(labelGroup, 'detail', { name: detail });
-      this.mainGroup.appendChild(labelGroup);
+      const labelG = this.group();
+      const labelY = tinyEndY + (altSign > 0 ? -6 : 12);
+      const labelText = this.text(tinyEndX, labelY, detail, 9, 'normal', '#5d6d7e', 'middle');
+      labelG.appendChild(labelText);
+      this.makeDraggable(labelG);
+      this.mainGroup.appendChild(labelG);
     });
   }
 
-  // ========== SVG要素作成ユーティリティ ==========
+  // ========== ユーティリティ ==========
 
-  createGroup() {
+  group() {
     return document.createElementNS('http://www.w3.org/2000/svg', 'g');
   }
 
-  createLine(x1, y1, x2, y2, strokeWidth, color) {
-    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-    line.setAttribute('x1', x1);
-    line.setAttribute('y1', y1);
-    line.setAttribute('x2', x2);
-    line.setAttribute('y2', y2);
-    line.setAttribute('stroke', color);
-    line.setAttribute('stroke-width', strokeWidth);
-    line.setAttribute('stroke-linecap', 'round');
-    return line;
+  line(x1, y1, x2, y2, strokeWidth, color) {
+    const l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    l.setAttribute('x1', x1);
+    l.setAttribute('y1', y1);
+    l.setAttribute('x2', x2);
+    l.setAttribute('y2', y2);
+    l.setAttribute('stroke', color);
+    l.setAttribute('stroke-width', strokeWidth);
+    l.setAttribute('stroke-linecap', 'round');
+    return l;
   }
 
-  createText(x, y, text, fontSize, fontWeight, fill, textAnchor) {
-    const el = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    el.setAttribute('x', x);
-    el.setAttribute('y', y);
-    el.setAttribute('font-size', fontSize);
-    el.setAttribute('font-weight', fontWeight);
-    el.setAttribute('fill', fill);
-    el.setAttribute('text-anchor', textAnchor);
-    el.setAttribute('dominant-baseline', 'middle');
-    el.setAttribute('font-family', "'Segoe UI', 'Hiragino Sans', 'Meiryo', sans-serif");
-    el.textContent = text;
-    return el;
+  text(x, y, content, fontSize, fontWeight, fill, anchor) {
+    const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    t.setAttribute('x', x);
+    t.setAttribute('y', y);
+    t.setAttribute('font-size', fontSize);
+    t.setAttribute('font-weight', fontWeight);
+    t.setAttribute('fill', fill);
+    t.setAttribute('text-anchor', anchor);
+    t.setAttribute('dominant-baseline', 'middle');
+    t.setAttribute('font-family', "'Hiragino Sans', 'Meiryo', sans-serif");
+    t.textContent = content;
+    return t;
   }
 
-  createArrowhead(x, y, angle, size, color) {
-    const group = this.createGroup();
-    const rad = (angle * Math.PI) / 180;
+  arrow(x, y, angleDeg, size, color) {
+    const rad = (angleDeg * Math.PI) / 180;
+    const p1 = { x, y };
+    const p2 = { x: x - size * Math.cos(rad - 0.4), y: y - size * Math.sin(rad - 0.4) };
+    const p3 = { x: x - size * 0.65 * Math.cos(rad), y: y - size * 0.65 * Math.sin(rad) };
+    const p4 = { x: x - size * Math.cos(rad + 0.4), y: y - size * Math.sin(rad + 0.4) };
 
-    const points = [
-      { x: x, y: y },
-      { x: x - size * Math.cos(rad - Math.PI / 7), y: y - size * Math.sin(rad - Math.PI / 7) },
-      { x: x - size * 0.7 * Math.cos(rad), y: y - size * 0.7 * Math.sin(rad) },
-      { x: x - size * Math.cos(rad + Math.PI / 7), y: y - size * Math.sin(rad + Math.PI / 7) }
-    ];
-
-    const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-    polygon.setAttribute('points', points.map(p => `${p.x},${p.y}`).join(' '));
-    polygon.setAttribute('fill', color);
-
-    group.appendChild(polygon);
-    return group;
+    const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+    poly.setAttribute('points', `${p1.x},${p1.y} ${p2.x},${p2.y} ${p3.x},${p3.y} ${p4.x},${p4.y}`);
+    poly.setAttribute('fill', color);
+    return poly;
   }
 
-  estimateTextWidth(text, fontSize) {
-    let width = 0;
-    for (const char of text) {
-      if (/[\u3000-\u9fff]/.test(char)) {
-        width += fontSize;
-      } else {
-        width += fontSize * 0.6;
-      }
+  textWidth(text, fontSize) {
+    let w = 0;
+    for (const c of text) {
+      w += /[\u3000-\u9fff]/.test(c) ? fontSize : fontSize * 0.6;
     }
-    return width;
+    return w;
   }
 
-  // ========== ドラッグ&ドロップ ==========
+  makeDraggable(g) {
+    g.setAttribute('cursor', 'move');
+    g.setAttribute('data-draggable', 'true');
+  }
 
-  setupEventListeners() {
+  // ========== イベント ==========
+
+  setupEvents() {
     this.svg.addEventListener('mousedown', this.onMouseDown.bind(this));
     this.svg.addEventListener('mousemove', this.onMouseMove.bind(this));
     this.svg.addEventListener('mouseup', this.onMouseUp.bind(this));
     this.svg.addEventListener('mouseleave', this.onMouseUp.bind(this));
     this.svg.addEventListener('wheel', this.onWheel.bind(this), { passive: false });
-    this.svg.addEventListener('contextmenu', (e) => e.preventDefault());
-    this.svg.addEventListener('dblclick', this.resetView.bind(this));
+    this.svg.addEventListener('dblclick', () => this.resetView());
 
     this.svg.addEventListener('touchstart', this.onTouchStart.bind(this), { passive: false });
     this.svg.addEventListener('touchmove', this.onTouchMove.bind(this), { passive: false });
     this.svg.addEventListener('touchend', this.onTouchEnd.bind(this), { passive: false });
   }
 
-  makeGroupDraggable(group, type, data = null) {
-    group.setAttribute('cursor', 'move');
-    group.setAttribute('data-type', type);
-    group.setAttribute('data-draggable', 'true');
-    if (data) {
-      group.setAttribute('data-name', data.name || '');
+  getPos(e) {
+    const CTM = this.svg.getScreenCTM();
+    return { x: (e.clientX - CTM.e) / CTM.a, y: (e.clientY - CTM.f) / CTM.d };
+  }
+
+  findDraggable(el) {
+    while (el && el.tagName !== 'svg') {
+      if (el.getAttribute && el.getAttribute('data-draggable') === 'true') return el;
+      el = el.parentElement;
     }
+    return null;
   }
 
   onMouseDown(e) {
-    const target = e.target;
-    let group = target;
-    while (group && group.tagName !== 'g') {
-      group = group.parentElement;
-    }
-
-    if (e.button === 1 || e.shiftKey) {
+    const draggable = this.findDraggable(e.target);
+    if (e.button === 1 || e.shiftKey || !draggable) {
       this.isPanning = true;
-      this.panStart = this.getMousePosition(e);
+      this.panStart = this.getPos(e);
       this.svg.style.cursor = 'grabbing';
-      e.preventDefault();
-      return;
-    }
-
-    if (group && group.getAttribute('data-draggable') === 'true') {
-      this.draggingElement = group;
-      const pt = this.getMousePosition(e);
-      const matrix = group.getCTM();
-      this.offset = { x: pt.x - matrix.e, y: pt.y - matrix.f };
-      group.style.opacity = '0.7';
-    } else {
-      this.isPanning = true;
-      this.panStart = this.getMousePosition(e);
-      this.svg.style.cursor = 'grabbing';
+    } else if (draggable) {
+      this.draggingElement = draggable;
+      const pt = this.getPos(e);
+      const m = draggable.getCTM();
+      this.offset = { x: pt.x - m.e, y: pt.y - m.f };
+      draggable.style.opacity = '0.7';
     }
   }
 
   onMouseMove(e) {
     if (this.isPanning) {
-      const pt = this.getMousePosition(e);
-      const dx = pt.x - this.panStart.x;
-      const dy = pt.y - this.panStart.y;
-      this.viewBox.x -= dx;
-      this.viewBox.y -= dy;
+      const pt = this.getPos(e);
+      this.viewBox.x -= pt.x - this.panStart.x;
+      this.viewBox.y -= pt.y - this.panStart.y;
       this.updateViewBox();
-      this.panStart = this.getMousePosition(e);
-      return;
+      this.panStart = this.getPos(e);
+    } else if (this.draggingElement) {
+      const pt = this.getPos(e);
+      this.draggingElement.setAttribute('transform', `translate(${pt.x - this.offset.x},${pt.y - this.offset.y})`);
     }
-
-    if (!this.draggingElement) return;
-
-    const pt = this.getMousePosition(e);
-    const x = pt.x - this.offset.x;
-    const y = pt.y - this.offset.y;
-    this.draggingElement.setAttribute('transform', `translate(${x}, ${y})`);
   }
 
   onMouseUp() {
@@ -755,26 +607,22 @@ class IshikawaDiagram {
   onWheel(e) {
     e.preventDefault();
     const delta = e.deltaY > 0 ? 1.1 : 0.9;
-    const pt = this.getMousePosition(e);
+    const pt = this.getPos(e);
 
-    const newWidth = this.viewBox.width * delta;
-    const newHeight = this.viewBox.height * delta;
-
-    const dx = (newWidth - this.viewBox.width) * ((pt.x - this.viewBox.x) / this.viewBox.width);
-    const dy = (newHeight - this.viewBox.height) * ((pt.y - this.viewBox.y) / this.viewBox.height);
-
-    this.viewBox.x -= dx;
-    this.viewBox.y -= dy;
-    this.viewBox.width = newWidth;
-    this.viewBox.height = newHeight;
+    const nw = this.viewBox.width * delta;
+    const nh = this.viewBox.height * delta;
+    this.viewBox.x -= (nw - this.viewBox.width) * ((pt.x - this.viewBox.x) / this.viewBox.width);
+    this.viewBox.y -= (nh - this.viewBox.height) * ((pt.y - this.viewBox.y) / this.viewBox.height);
+    this.viewBox.width = nw;
+    this.viewBox.height = nh;
     this.zoomLevel *= delta;
     this.updateViewBox();
   }
 
   resetView() {
-    const width = this.viewBox.width / this.zoomLevel;
-    const height = this.viewBox.height / this.zoomLevel;
-    this.viewBox = { x: 0, y: 0, width, height };
+    const w = this.viewBox.width / this.zoomLevel;
+    const h = this.viewBox.height / this.zoomLevel;
+    this.viewBox = { x: 0, y: 0, width: w, height: h };
     this.zoomLevel = 1;
     this.updateViewBox();
   }
@@ -783,91 +631,72 @@ class IshikawaDiagram {
     this.svg.setAttribute('viewBox', `${this.viewBox.x} ${this.viewBox.y} ${this.viewBox.width} ${this.viewBox.height}`);
   }
 
-  getMousePosition(e) {
+  // タッチ
+  getTouchPos(t) {
     const CTM = this.svg.getScreenCTM();
-    return {
-      x: (e.clientX - CTM.e) / CTM.a,
-      y: (e.clientY - CTM.f) / CTM.d
-    };
+    return { x: (t.clientX - CTM.e) / CTM.a, y: (t.clientY - CTM.f) / CTM.d };
   }
 
-  // ========== タッチイベント ==========
+  getTouchDist(t1, t2) {
+    return Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+  }
 
   onTouchStart(e) {
     e.preventDefault();
-    this.touches = Array.from(e.touches);
-
+    this.touches = [...e.touches];
     if (this.touches.length === 1) {
-      const touch = this.touches[0];
-      const target = document.elementFromPoint(touch.clientX, touch.clientY);
-      let group = target;
-      while (group && group.tagName !== 'g') {
-        group = group.parentElement;
-      }
-
-      if (group && group.getAttribute('data-draggable') === 'true') {
-        this.draggingElement = group;
-        const pt = this.getTouchPosition(touch);
-        const matrix = group.getCTM();
-        this.offset = { x: pt.x - matrix.e, y: pt.y - matrix.f };
-        group.style.opacity = '0.7';
+      const t = this.touches[0];
+      const el = document.elementFromPoint(t.clientX, t.clientY);
+      const draggable = this.findDraggable(el);
+      if (draggable) {
+        this.draggingElement = draggable;
+        const pt = this.getTouchPos(t);
+        const m = draggable.getCTM();
+        this.offset = { x: pt.x - m.e, y: pt.y - m.f };
+        draggable.style.opacity = '0.7';
       } else {
         this.isPanning = true;
-        this.panStart = this.getTouchPosition(touch);
+        this.panStart = this.getTouchPos(t);
       }
     } else if (this.touches.length === 2) {
       this.isPanning = false;
       this.draggingElement = null;
-      this.lastTouchDistance = this.getTouchDistance(this.touches[0], this.touches[1]);
+      this.lastTouchDistance = this.getTouchDist(this.touches[0], this.touches[1]);
     }
   }
 
   onTouchMove(e) {
     e.preventDefault();
-    this.touches = Array.from(e.touches);
-
+    this.touches = [...e.touches];
     if (this.touches.length === 1) {
-      const touch = this.touches[0];
+      const t = this.touches[0];
       if (this.draggingElement) {
-        const pt = this.getTouchPosition(touch);
-        const x = pt.x - this.offset.x;
-        const y = pt.y - this.offset.y;
-        this.draggingElement.setAttribute('transform', `translate(${x}, ${y})`);
+        const pt = this.getTouchPos(t);
+        this.draggingElement.setAttribute('transform', `translate(${pt.x - this.offset.x},${pt.y - this.offset.y})`);
       } else if (this.isPanning) {
-        const pt = this.getTouchPosition(touch);
-        const dx = pt.x - this.panStart.x;
-        const dy = pt.y - this.panStart.y;
-        this.viewBox.x -= dx;
-        this.viewBox.y -= dy;
+        const pt = this.getTouchPos(t);
+        this.viewBox.x -= pt.x - this.panStart.x;
+        this.viewBox.y -= pt.y - this.panStart.y;
         this.updateViewBox();
-        this.panStart = this.getTouchPosition(touch);
+        this.panStart = this.getTouchPos(t);
       }
     } else if (this.touches.length === 2) {
-      const currentDistance = this.getTouchDistance(this.touches[0], this.touches[1]);
-      const delta = currentDistance / this.lastTouchDistance;
-
-      const centerX = (this.touches[0].clientX + this.touches[1].clientX) / 2;
-      const centerY = (this.touches[0].clientY + this.touches[1].clientY) / 2;
+      const dist = this.getTouchDist(this.touches[0], this.touches[1]);
+      const delta = dist / this.lastTouchDistance;
+      const cx = (this.touches[0].clientX + this.touches[1].clientX) / 2;
+      const cy = (this.touches[0].clientY + this.touches[1].clientY) / 2;
       const CTM = this.svg.getScreenCTM();
-      const centerPt = {
-        x: (centerX - CTM.e) / CTM.a,
-        y: (centerY - CTM.f) / CTM.d
-      };
+      const cpt = { x: (cx - CTM.e) / CTM.a, y: (cy - CTM.f) / CTM.d };
 
-      const newWidth = this.viewBox.width / delta;
-      const newHeight = this.viewBox.height / delta;
-
-      const dx = (newWidth - this.viewBox.width) * ((centerPt.x - this.viewBox.x) / this.viewBox.width);
-      const dy = (newHeight - this.viewBox.height) * ((centerPt.y - this.viewBox.y) / this.viewBox.height);
-
-      this.viewBox.x -= dx;
-      this.viewBox.y -= dy;
-      this.viewBox.width = newWidth;
-      this.viewBox.height = newHeight;
+      const nw = this.viewBox.width / delta;
+      const nh = this.viewBox.height / delta;
+      this.viewBox.x -= (nw - this.viewBox.width) * ((cpt.x - this.viewBox.x) / this.viewBox.width);
+      this.viewBox.y -= (nh - this.viewBox.height) * ((cpt.y - this.viewBox.y) / this.viewBox.height);
+      this.viewBox.width = nw;
+      this.viewBox.height = nh;
       this.zoomLevel /= delta;
       this.updateViewBox();
-
-      this.lastTouchDistance = currentDistance;
+      this.lastTouchDistance = dist;
     }
   }
 
@@ -879,122 +708,54 @@ class IshikawaDiagram {
     }
     this.isPanning = false;
     this.touches = [];
-    this.lastTouchDistance = 0;
-  }
-
-  getTouchPosition(touch) {
-    const CTM = this.svg.getScreenCTM();
-    return {
-      x: (touch.clientX - CTM.e) / CTM.a,
-      y: (touch.clientY - CTM.f) / CTM.d
-    };
-  }
-
-  getTouchDistance(touch1, touch2) {
-    const dx = touch2.clientX - touch1.clientX;
-    const dy = touch2.clientY - touch1.clientY;
-    return Math.sqrt(dx * dx + dy * dy);
-  }
-
-  // ========== レスポンシブ ==========
-
-  setupResponsive() {
-    if (typeof ResizeObserver !== 'undefined') {
-      this.resizeObserver = new ResizeObserver(() => {
-        if (this.resizeTimeout) clearTimeout(this.resizeTimeout);
-        this.resizeTimeout = setTimeout(() => this.handleResize(), 100);
-      });
-      this.resizeObserver.observe(this.container);
-    }
-
-    window.addEventListener('resize', () => {
-      if (this.resizeTimeout) clearTimeout(this.resizeTimeout);
-      this.resizeTimeout = setTimeout(() => this.handleResize(), 100);
-    });
-
-    this.handleResize();
-  }
-
-  handleResize() {
-    if (!this.svg || !this.container) return;
-
-    const containerWidth = this.container.clientWidth;
-    const aspectRatio = this.viewBox.width / this.viewBox.height;
-    let svgHeight = containerWidth / aspectRatio;
-    svgHeight = Math.min(svgHeight, window.innerHeight * 0.8, 700);
-    svgHeight = Math.max(svgHeight, 350);
-    this.svg.style.height = `${svgHeight}px`;
-  }
-
-  destroy() {
-    if (this.resizeObserver) this.resizeObserver.disconnect();
-    if (this.resizeTimeout) clearTimeout(this.resizeTimeout);
   }
 
   // ========== エクスポート ==========
 
   exportAsPNG() {
-    const svgClone = this.svg.cloneNode(true);
-    svgClone.setAttribute('width', this.viewBox.width);
-    svgClone.setAttribute('height', this.viewBox.height);
-    svgClone.setAttribute('viewBox', `0 0 ${this.viewBox.width} ${this.viewBox.height}`);
+    const clone = this.svg.cloneNode(true);
+    clone.setAttribute('width', this.viewBox.width);
+    clone.setAttribute('height', this.viewBox.height);
+    clone.setAttribute('viewBox', `0 0 ${this.viewBox.width} ${this.viewBox.height}`);
 
-    const svgData = new XMLSerializer().serializeToString(svgClone);
-    const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
-    const url = URL.createObjectURL(svgBlob);
+    const data = new XMLSerializer().serializeToString(clone);
+    const blob = new Blob([data], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
 
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     const img = new Image();
-    const scale = 2;
-    canvas.width = this.viewBox.width * scale;
-    canvas.height = this.viewBox.height * scale;
+    canvas.width = this.viewBox.width * 2;
+    canvas.height = this.viewBox.height * 2;
 
     img.onload = () => {
-      ctx.fillStyle = '#ffffff';
+      ctx.fillStyle = '#fff';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-      canvas.toBlob((blob) => {
-        const downloadUrl = URL.createObjectURL(blob);
+      canvas.toBlob(b => {
         const a = document.createElement('a');
-        a.href = downloadUrl;
-        a.download = `ishikawa-diagram-${Date.now()}.png`;
-        document.body.appendChild(a);
+        a.href = URL.createObjectURL(b);
+        a.download = `ishikawa-${Date.now()}.png`;
         a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(downloadUrl);
         URL.revokeObjectURL(url);
       }, 'image/png');
     };
-
-    img.onerror = () => {
-      alert('PNG出力に失敗しました。SVG形式をお試しください。');
-      URL.revokeObjectURL(url);
-    };
-
     img.src = url;
   }
 
   exportAsSVG() {
-    const svgClone = this.svg.cloneNode(true);
-    svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-    svgClone.setAttribute('width', this.viewBox.width);
-    svgClone.setAttribute('height', this.viewBox.height);
-    svgClone.setAttribute('viewBox', `0 0 ${this.viewBox.width} ${this.viewBox.height}`);
+    const clone = this.svg.cloneNode(true);
+    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    clone.setAttribute('width', this.viewBox.width);
+    clone.setAttribute('height', this.viewBox.height);
+    clone.setAttribute('viewBox', `0 0 ${this.viewBox.width} ${this.viewBox.height}`);
 
-    const svgData = new XMLSerializer().serializeToString(svgClone);
-    const fullSvg = '<?xml version="1.0" encoding="UTF-8"?>\n' + svgData;
-
-    const blob = new Blob([fullSvg], { type: 'image/svg+xml;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
+    const data = '<?xml version="1.0" encoding="UTF-8"?>\n' + new XMLSerializer().serializeToString(clone);
+    const blob = new Blob([data], { type: 'image/svg+xml;charset=utf-8' });
     const a = document.createElement('a');
-    a.href = url;
-    a.download = `ishikawa-diagram-${Date.now()}.svg`;
-    document.body.appendChild(a);
+    a.href = URL.createObjectURL(blob);
+    a.download = `ishikawa-${Date.now()}.svg`;
     a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
   }
 }
 
