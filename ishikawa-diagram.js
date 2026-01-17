@@ -1,16 +1,16 @@
 /**
- * 石川ダイアグラム（特性要因図）v5.0
- * シンプルで実用的な配置
+ * 石川ダイアグラム（特性要因図）v6.0
+ * 正しい魚骨形状 - 中骨は大骨の上下に交互配置
  */
 class IshikawaDiagram {
   constructor(containerId) {
     this.container = document.getElementById(containerId);
     this.svg = null;
     this.data = null;
-    this.viewBox = { x: 0, y: 0, width: 1200, height: 700 };
+    this.viewBox = { x: 0, y: 0, width: 1400, height: 800 };
+    this.zoomLevel = 1;
     this.isPanning = false;
     this.panStart = { x: 0, y: 0 };
-    this.zoomLevel = 1;
     this.dragging = null;
     this.dragOffset = { x: 0, y: 0 };
   }
@@ -19,168 +19,228 @@ class IshikawaDiagram {
     this.data = data;
     const n = data.categories.length;
 
-    // サイズ計算
-    const width = Math.max(1200, 900 + n * 120);
-    const height = 700;
+    // キャンバスサイズ
+    const width = Math.max(1400, 1100 + n * 100);
+    const height = 800;
 
     this.viewBox = { x: 0, y: 0, width, height };
     this.initSVG(width, height);
 
-    // 背骨
     const spineY = height / 2;
-    const spineStart = 50;
-    const spineEnd = width - 100;
-
-    this.drawLine(spineStart, spineY, spineEnd, spineY, 4, '#2c3e50');
-    this.drawArrow(spineEnd, spineY, 0, 14, '#2c3e50');
-
-    // 効果ボックス
-    this.drawEffectBox(spineEnd + 10, spineY, data.effect);
-
-    // カテゴリー配置
-    const topCats = data.categories.filter((_, i) => i % 2 === 0);
-    const botCats = data.categories.filter((_, i) => i % 2 === 1);
-
+    const spineStart = 80;
+    const spineEnd = width - 130;
     const spineLen = spineEnd - spineStart;
 
+    // 背骨
+    this.drawLine(spineStart, spineY, spineEnd, spineY, 5, '#1a252f');
+    this.drawArrow(spineEnd, spineY, 0, 16, '#1a252f');
+
+    // 効果ボックス
+    this.drawEffectBox(spineEnd + 15, spineY, height, data.effect);
+
+    // カテゴリーを上下に分ける
+    const topCats = [];
+    const botCats = [];
+    data.categories.forEach((cat, i) => {
+      if (i % 2 === 0) topCats.push(cat);
+      else botCats.push(cat);
+    });
+
     // 上側カテゴリー
+    const topSpacing = spineLen / (topCats.length + 1);
     topCats.forEach((cat, i) => {
-      const x = spineStart + spineLen * (i + 1) / (topCats.length + 1);
-      this.drawCategory(cat, x, spineY, true, spineLen / (topCats.length + 1));
+      const x = spineStart + topSpacing * (i + 1);
+      this.drawCategory(cat, x, spineY, true, topSpacing, height);
     });
 
     // 下側カテゴリー
+    const botSpacing = spineLen / (botCats.length + 1);
     botCats.forEach((cat, i) => {
-      const x = spineStart + spineLen * (i + 1) / (botCats.length + 1);
-      this.drawCategory(cat, x, spineY, false, spineLen / (botCats.length + 1));
+      const x = spineStart + botSpacing * (i + 1);
+      this.drawCategory(cat, x, spineY, false, botSpacing, height);
     });
 
     this.setupEvents();
   }
 
-  drawCategory(cat, spineX, spineY, isTop, availWidth) {
-    const angle = 60 * Math.PI / 180;
+  drawCategory(cat, spineX, spineY, isTop, spacing, height) {
+    const angle = 55 * Math.PI / 180;
     const dir = isTop ? -1 : 1;
 
-    // 大骨の長さ（利用可能幅に基づく）
-    const boneLen = Math.min(availWidth * 0.6, 200);
+    // 利用可能な垂直スペース
+    const vertSpace = (height / 2) - 80;
 
-    // 大骨終点
+    // 大骨の長さ
+    const boneLen = Math.min(vertSpace / Math.sin(angle) * 0.75, spacing * 0.55, 220);
+
+    // 大骨の終点
     const endX = spineX - boneLen * Math.cos(angle);
     const endY = spineY + dir * boneLen * Math.sin(angle);
 
-    // 大骨
-    this.drawLine(spineX, spineY, endX, endY, 2.5, '#34495e');
-    this.drawArrow(spineX, spineY, Math.atan2(spineY - endY, spineX - endX) * 180 / Math.PI, 9, '#34495e');
+    // 大骨を描画
+    this.drawLine(spineX, spineY, endX, endY, 3, '#2c3e50');
+    this.drawArrow(spineX, spineY, Math.atan2(spineY - endY, spineX - endX) * 180 / Math.PI, 11, '#2c3e50');
 
-    // カテゴリーラベル（ボックス）
+    // カテゴリーボックス
     const g = this.group();
-    const tw = this.textWidth(cat.name, 12);
-    const bw = tw + 16, bh = 24;
-
-    const rect = this.rect(endX - bw/2, endY - bh/2, bw, bh, '#3498db', 4);
-    g.appendChild(rect);
-    g.appendChild(this.text(endX, endY, cat.name, 12, 'bold', '#fff'));
+    const tw = this.textWidth(cat.name, 13);
+    const bw = tw + 18, bh = 26;
+    g.appendChild(this.rect(endX - bw / 2, endY - bh / 2, bw, bh, '#2980b9', 5));
+    g.appendChild(this.text(endX, endY, cat.name, 13, 'bold', '#fff'));
     this.makeDraggable(g);
     this.mainGroup.appendChild(g);
 
     // 中骨を描画
-    const causes = cat.causes;
-    const numCauses = causes.length;
-    if (numCauses === 0) return;
+    this.drawCauses(cat.causes, spineX, spineY, endX, endY, isTop, boneLen);
+  }
 
-    // 中骨の間隔
-    const causeSpacing = boneLen * 0.8 / (numCauses + 1);
+  drawCauses(causes, spineX, spineY, endX, endY, isTop, majorLen) {
+    const n = causes.length;
+    if (n === 0) return;
 
-    causes.forEach((cause, ci) => {
-      // 大骨上の位置
-      const t = (ci + 1) / (numCauses + 1);
-      const cx = spineX + (endX - spineX) * t;
-      const cy = spineY + (endY - spineY) * t;
+    // 大骨のベクトル
+    const dx = endX - spineX;
+    const dy = endY - spineY;
+    const len = Math.sqrt(dx * dx + dy * dy);
 
-      // 中骨の長さ
-      const causeLen = Math.min(causeSpacing * 0.9, 70);
+    // 中骨の長さ（大骨の長さに比例、でも短めに）
+    const causeLen = Math.min(majorLen * 0.35, 75);
 
-      // 中骨は水平に、背骨と反対方向へ
-      const causeEndX = cx - causeLen;
-      const causeEndY = cy;
+    causes.forEach((cause, i) => {
+      // 大骨上の位置（先端側を避ける）
+      const t = 0.15 + 0.7 * (i / Math.max(n - 1, 1));
+      const attachX = spineX + dx * t;
+      const attachY = spineY + dy * t;
 
-      this.drawLine(cx, cy, causeEndX, causeEndY, 1.8, '#7f8c8d');
-      this.drawArrow(cx, cy, 180, 6, '#7f8c8d');
+      // 中骨の方向：大骨の上下に交互配置
+      // 上側カテゴリーの場合、奇数番は大骨の上側、偶数番は下側
+      const side = (i % 2 === 0) ? 1 : -1;
 
-      // 中骨ラベル
-      const cg = this.group();
-      cg.appendChild(this.text(causeEndX - 3, causeEndY - 10, cause.name, 10, '600', '#2c3e50', 'end'));
-      this.makeDraggable(cg);
-      this.mainGroup.appendChild(cg);
+      // 大骨に垂直な方向を計算
+      const perpX = -dy / len;
+      const perpY = dx / len;
+
+      // 中骨の先端
+      const causeEndX = attachX + perpX * causeLen * side;
+      const causeEndY = attachY + perpY * causeLen * side;
+
+      // 中骨を描画
+      this.drawLine(attachX, attachY, causeEndX, causeEndY, 2, '#5d6d7e');
+      this.drawArrow(attachX, attachY, Math.atan2(attachY - causeEndY, attachX - causeEndX) * 180 / Math.PI, 7, '#5d6d7e');
+
+      // ラベル
+      const labelG = this.group();
+      const labelOffsetY = side * (isTop ? -1 : 1) > 0 ? -10 : 14;
+      labelG.appendChild(this.text(causeEndX, causeEndY + labelOffsetY, cause.name, 11, '600', '#2c3e50'));
+      this.makeDraggable(labelG);
+      this.mainGroup.appendChild(labelG);
 
       // 小骨
-      const subs = cause.subcauses;
-      if (subs.length === 0) return;
-
-      const subSpacing = causeLen / (subs.length + 1);
-
-      subs.forEach((sub, si) => {
-        const st = (si + 1) / (subs.length + 1);
-        const sx = causeEndX + (cx - causeEndX) * st;
-        const sy = causeEndY;
-
-        // 小骨の長さと方向
-        const subLen = Math.min(subSpacing * 0.8, 35);
-        const subDir = (si % 2 === 0) ? -1 : 1;
-        const subAngle = 55 * Math.PI / 180;
-
-        const subEndX = sx - subLen * Math.cos(subAngle);
-        const subEndY = sy + subDir * subLen * Math.sin(subAngle);
-
-        this.drawLine(sx, sy, subEndX, subEndY, 1.2, '#95a5a6');
-        this.drawArrow(sx, sy, Math.atan2(sy - subEndY, sx - subEndX) * 180 / Math.PI, 4, '#95a5a6');
-
-        // 小骨ラベル
-        const sg = this.group();
-        sg.appendChild(this.text(subEndX, subEndY + (subDir < 0 ? -8 : 14), sub.name, 9, 'normal', '#555', 'middle'));
-        this.makeDraggable(sg);
-        this.mainGroup.appendChild(sg);
-
-        // 孫骨
-        const details = sub.details;
-        if (details.length === 0) return;
-
-        details.forEach((det, di) => {
-          const dt = (di + 1) / (details.length + 1);
-          const dx = subEndX + (sx - subEndX) * dt;
-          const dy = subEndY + (sy - subEndY) * dt;
-
-          const detLen = 20;
-          const detDir = (di % 2 === 0) ? 1 : -1;
-
-          const detEndX = dx - detLen;
-          const detEndY = dy;
-
-          this.drawLine(dx, dy, detEndX, detEndY, 0.8, '#bdc3c7');
-
-          const dg = this.group();
-          dg.appendChild(this.text(detEndX - 2, detEndY + (detDir < 0 ? -5 : 10), det, 8, 'normal', '#666', 'end'));
-          this.makeDraggable(dg);
-          this.mainGroup.appendChild(dg);
-        });
-      });
+      this.drawSubcauses(cause.subcauses, attachX, attachY, causeEndX, causeEndY, side, i);
     });
   }
 
-  drawEffectBox(x, spineY, text) {
-    const boxW = 60;
-    const boxH = Math.min(350, 20 + text.length * 20);
+  drawSubcauses(subcauses, startX, startY, endX, endY, parentSide, causeIdx) {
+    const n = subcauses.length;
+    if (n === 0) return;
+
+    // 中骨のベクトル
+    const dx = endX - startX;
+    const dy = endY - startY;
+    const len = Math.sqrt(dx * dx + dy * dy);
+
+    // 小骨の長さ
+    const subLen = Math.min(len * 0.5, 40);
+
+    // 小骨の角度（中骨に対して55度）
+    const subAngle = 55 * Math.PI / 180;
+
+    subcauses.forEach((sub, i) => {
+      // 中骨上の位置
+      const t = (i + 1) / (n + 1);
+      const attachX = startX + dx * t;
+      const attachY = startY + dy * t;
+
+      // 交互に上下
+      const side = ((i + causeIdx) % 2 === 0) ? 1 : -1;
+
+      // 小骨の方向（中骨に対して斜め）
+      const ux = dx / len;
+      const uy = dy / len;
+      const cos = Math.cos(subAngle * side);
+      const sin = Math.sin(subAngle * side);
+      const subDirX = ux * cos - uy * sin;
+      const subDirY = ux * sin + uy * cos;
+
+      const subEndX = attachX + subDirX * subLen;
+      const subEndY = attachY + subDirY * subLen;
+
+      // 小骨を描画
+      this.drawLine(attachX, attachY, subEndX, subEndY, 1.3, '#7f8c8d');
+      this.drawArrow(attachX, attachY, Math.atan2(attachY - subEndY, attachX - subEndX) * 180 / Math.PI, 5, '#7f8c8d');
+
+      // ラベル
+      const labelG = this.group();
+      const labelY = subEndY + (side > 0 ? -8 : 12);
+      labelG.appendChild(this.text(subEndX, labelY, sub.name, 9, 'normal', '#34495e'));
+      this.makeDraggable(labelG);
+      this.mainGroup.appendChild(labelG);
+
+      // 孫骨
+      this.drawDetails(sub.details, attachX, attachY, subEndX, subEndY, i);
+    });
+  }
+
+  drawDetails(details, startX, startY, endX, endY, subIdx) {
+    const n = details.length;
+    if (n === 0) return;
+
+    const dx = endX - startX;
+    const dy = endY - startY;
+    const len = Math.sqrt(dx * dx + dy * dy);
+
+    const detLen = 25;
+
+    // 垂直方向
+    const perpX = -dy / len;
+    const perpY = dx / len;
+
+    details.forEach((det, i) => {
+      const t = (i + 1) / (n + 1);
+      const attachX = startX + dx * t;
+      const attachY = startY + dy * t;
+
+      const side = ((i + subIdx) % 2 === 0) ? 1 : -1;
+
+      const detEndX = attachX + perpX * detLen * side;
+      const detEndY = attachY + perpY * detLen * side;
+
+      this.drawLine(attachX, attachY, detEndX, detEndY, 0.8, '#95a5a6');
+
+      const labelG = this.group();
+      const labelY = detEndY + (side > 0 ? -6 : 10);
+      labelG.appendChild(this.text(detEndX, labelY, det, 8, 'normal', '#666'));
+      this.makeDraggable(labelG);
+      this.mainGroup.appendChild(labelG);
+    });
+  }
+
+  drawEffectBox(x, spineY, height, text) {
+    const boxW = 65;
+    const boxH = Math.min(height * 0.5, 380);
     const boxY = spineY - boxH / 2;
 
     const g = this.group();
     g.appendChild(this.rect(x, boxY, boxW, boxH, '#c0392b', 6));
 
-    const fontSize = 15;
-    text.split('').forEach((c, i) => {
+    const fontSize = 16;
+    const lineH = fontSize + 4;
+    const maxChars = Math.floor((boxH - 40) / lineH);
+
+    text.split('').slice(0, maxChars).forEach((c, i) => {
       const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
       t.setAttribute('x', x + boxW / 2);
-      t.setAttribute('y', boxY + 25 + i * (fontSize + 3));
+      t.setAttribute('y', boxY + 28 + i * lineH);
       t.setAttribute('font-size', fontSize);
       t.setAttribute('font-weight', 'bold');
       t.setAttribute('fill', 'white');
@@ -194,7 +254,7 @@ class IshikawaDiagram {
     this.mainGroup.appendChild(g);
   }
 
-  // === SVG基本操作 ===
+  // === SVG基本 ===
 
   initSVG(w, h) {
     this.container.innerHTML = '';
@@ -207,7 +267,7 @@ class IshikawaDiagram {
     this.svg.style.touchAction = 'none';
 
     const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-    defs.innerHTML = '<filter id="sh"><feDropShadow dx="1" dy="1" stdDeviation="1.5" flood-opacity="0.15"/></filter>';
+    defs.innerHTML = '<filter id="sh"><feDropShadow dx="1" dy="1" stdDeviation="2" flood-opacity="0.15"/></filter>';
     this.svg.appendChild(defs);
 
     this.mainGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -215,16 +275,12 @@ class IshikawaDiagram {
     this.container.appendChild(this.svg);
   }
 
-  group() {
-    return document.createElementNS('http://www.w3.org/2000/svg', 'g');
-  }
+  group() { return document.createElementNS('http://www.w3.org/2000/svg', 'g'); }
 
   drawLine(x1, y1, x2, y2, sw, color) {
     const l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-    l.setAttribute('x1', x1);
-    l.setAttribute('y1', y1);
-    l.setAttribute('x2', x2);
-    l.setAttribute('y2', y2);
+    l.setAttribute('x1', x1); l.setAttribute('y1', y1);
+    l.setAttribute('x2', x2); l.setAttribute('y2', y2);
     l.setAttribute('stroke', color);
     l.setAttribute('stroke-width', sw);
     l.setAttribute('stroke-linecap', 'round');
@@ -233,20 +289,16 @@ class IshikawaDiagram {
 
   rect(x, y, w, h, fill, r) {
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    rect.setAttribute('x', x);
-    rect.setAttribute('y', y);
-    rect.setAttribute('width', w);
-    rect.setAttribute('height', h);
-    rect.setAttribute('fill', fill);
-    rect.setAttribute('rx', r);
+    rect.setAttribute('x', x); rect.setAttribute('y', y);
+    rect.setAttribute('width', w); rect.setAttribute('height', h);
+    rect.setAttribute('fill', fill); rect.setAttribute('rx', r);
     rect.setAttribute('filter', 'url(#sh)');
     return rect;
   }
 
   text(x, y, str, size, weight, fill, anchor = 'middle') {
     const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    t.setAttribute('x', x);
-    t.setAttribute('y', y);
+    t.setAttribute('x', x); t.setAttribute('y', y);
     t.setAttribute('font-size', size);
     t.setAttribute('font-weight', weight);
     t.setAttribute('fill', fill);
@@ -325,10 +377,7 @@ class IshikawaDiagram {
     };
 
     this.svg.onmouseup = this.svg.onmouseleave = () => {
-      if (this.dragging) {
-        this.dragging.style.opacity = '1';
-        this.dragging = null;
-      }
+      if (this.dragging) { this.dragging.style.opacity = '1'; this.dragging = null; }
       this.isPanning = false;
       this.svg.style.cursor = 'default';
     };
@@ -340,8 +389,7 @@ class IshikawaDiagram {
       const nw = this.viewBox.width * d, nh = this.viewBox.height * d;
       this.viewBox.x -= (nw - this.viewBox.width) * ((p.x - this.viewBox.x) / this.viewBox.width);
       this.viewBox.y -= (nh - this.viewBox.height) * ((p.y - this.viewBox.y) / this.viewBox.height);
-      this.viewBox.width = nw;
-      this.viewBox.height = nh;
+      this.viewBox.width = nw; this.viewBox.height = nh;
       this.zoomLevel *= d;
       this.svg.setAttribute('viewBox', `${this.viewBox.x} ${this.viewBox.y} ${this.viewBox.width} ${this.viewBox.height}`);
     };
@@ -404,8 +452,7 @@ class IshikawaDiagram {
         const cp = { x: (cx - m.e) / m.a, y: (cy - m.f) / m.d };
         this.viewBox.x -= (nw - this.viewBox.width) * ((cp.x - this.viewBox.x) / this.viewBox.width);
         this.viewBox.y -= (nh - this.viewBox.height) * ((cp.y - this.viewBox.y) / this.viewBox.height);
-        this.viewBox.width = nw;
-        this.viewBox.height = nh;
+        this.viewBox.width = nw; this.viewBox.height = nh;
         this.svg.setAttribute('viewBox', `${this.viewBox.x} ${this.viewBox.y} ${this.viewBox.width} ${this.viewBox.height}`);
         lastDist = dist;
       }
@@ -413,10 +460,7 @@ class IshikawaDiagram {
 
     this.svg.ontouchend = e => {
       e.preventDefault();
-      if (this.dragging) {
-        this.dragging.style.opacity = '1';
-        this.dragging = null;
-      }
+      if (this.dragging) { this.dragging.style.opacity = '1'; this.dragging = null; }
       this.isPanning = false;
       touches = [];
     };
