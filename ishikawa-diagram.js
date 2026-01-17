@@ -1,6 +1,7 @@
 /**
- * 石川ダイアグラム（特性要因図）v6.0
- * 正しい魚骨形状 - 中骨は大骨の上下に交互配置
+ * 石川ダイアグラム（特性要因図）v7.0
+ * 伝統的な魚骨形状 - 中骨は水平に左向き（背骨と平行）
+ * 大骨上の取り付け位置による自然な垂直分散
  */
 class IshikawaDiagram {
   constructor(containerId) {
@@ -19,16 +20,16 @@ class IshikawaDiagram {
     this.data = data;
     const n = data.categories.length;
 
-    // キャンバスサイズ
-    const width = Math.max(1400, 1100 + n * 100);
-    const height = 800;
+    // キャンバスサイズ（カテゴリー数に応じて拡張）
+    const width = Math.max(1400, 1000 + n * 120);
+    const height = 850;
 
     this.viewBox = { x: 0, y: 0, width, height };
     this.initSVG(width, height);
 
     const spineY = height / 2;
-    const spineStart = 80;
-    const spineEnd = width - 130;
+    const spineStart = 120;
+    const spineEnd = width - 140;
     const spineLen = spineEnd - spineStart;
 
     // 背骨
@@ -64,134 +65,121 @@ class IshikawaDiagram {
   }
 
   drawCategory(cat, spineX, spineY, isTop, spacing, height) {
-    const angle = 55 * Math.PI / 180;
+    const angle = 60 * Math.PI / 180; // 60度で傾斜
     const dir = isTop ? -1 : 1;
 
     // 利用可能な垂直スペース
-    const vertSpace = (height / 2) - 80;
+    const vertSpace = (height / 2) - 100;
 
-    // 大骨の長さ
-    const boneLen = Math.min(vertSpace / Math.sin(angle) * 0.75, spacing * 0.55, 220);
+    // 大骨の長さ（カテゴリーの要因数に応じて調整）
+    const causesCount = cat.causes.length;
+    const baseLen = Math.min(vertSpace * 0.85, spacing * 0.6, 200);
+    const boneLen = baseLen;
 
     // 大骨の終点
     const endX = spineX - boneLen * Math.cos(angle);
     const endY = spineY + dir * boneLen * Math.sin(angle);
 
     // 大骨を描画
-    this.drawLine(spineX, spineY, endX, endY, 3, '#2c3e50');
-    this.drawArrow(spineX, spineY, Math.atan2(spineY - endY, spineX - endX) * 180 / Math.PI, 11, '#2c3e50');
+    this.drawLine(spineX, spineY, endX, endY, 3.5, '#2c3e50');
+    this.drawArrow(spineX, spineY, Math.atan2(spineY - endY, spineX - endX) * 180 / Math.PI, 12, '#2c3e50');
 
     // カテゴリーボックス
     const g = this.group();
-    const tw = this.textWidth(cat.name, 13);
-    const bw = tw + 18, bh = 26;
-    g.appendChild(this.rect(endX - bw / 2, endY - bh / 2, bw, bh, '#2980b9', 5));
-    g.appendChild(this.text(endX, endY, cat.name, 13, 'bold', '#fff'));
+    const tw = this.textWidth(cat.name, 14);
+    const bw = tw + 20, bh = 28;
+    g.appendChild(this.rect(endX - bw / 2, endY - bh / 2, bw, bh, '#2980b9', 6));
+    g.appendChild(this.text(endX, endY, cat.name, 14, 'bold', '#fff'));
     this.makeDraggable(g);
     this.mainGroup.appendChild(g);
 
     // 中骨を描画
-    this.drawCauses(cat.causes, spineX, spineY, endX, endY, isTop, boneLen);
+    this.drawCauses(cat.causes, spineX, spineY, endX, endY, isTop, boneLen, spacing);
   }
 
-  drawCauses(causes, spineX, spineY, endX, endY, isTop, majorLen) {
+  drawCauses(causes, spineX, spineY, endX, endY, isTop, majorLen, spacing) {
     const n = causes.length;
     if (n === 0) return;
 
     // 大骨のベクトル
     const dx = endX - spineX;
     const dy = endY - spineY;
-    const len = Math.sqrt(dx * dx + dy * dy);
 
-    // 中骨の長さ（大骨の長さに比例、でも短めに）
-    const causeLen = Math.min(majorLen * 0.35, 75);
+    // 中骨の長さ（隣接カテゴリーと干渉しないよう短めに）
+    // spacing の半分以下に制限
+    const causeLen = Math.min(majorLen * 0.4, spacing * 0.35, 80);
 
     causes.forEach((cause, i) => {
-      // 大骨上の位置（先端側を避ける）
-      const t = 0.15 + 0.7 * (i / Math.max(n - 1, 1));
+      // 大骨上の位置（先端側を避けて均等配置）
+      // 先端近くはカテゴリーボックスがあるので避ける
+      const t = 0.15 + 0.65 * (i / Math.max(n - 1, 1));
       const attachX = spineX + dx * t;
       const attachY = spineY + dy * t;
 
-      // 中骨の方向：大骨の上下に交互配置
-      // 上側カテゴリーの場合、奇数番は大骨の上側、偶数番は下側
-      const side = (i % 2 === 0) ? 1 : -1;
-
-      // 大骨に垂直な方向を計算
-      const perpX = -dy / len;
-      const perpY = dx / len;
-
-      // 中骨の先端
-      const causeEndX = attachX + perpX * causeLen * side;
-      const causeEndY = attachY + perpY * causeLen * side;
+      // 中骨は水平に左向き（背骨と平行）
+      const causeEndX = attachX - causeLen;
+      const causeEndY = attachY;
 
       // 中骨を描画
       this.drawLine(attachX, attachY, causeEndX, causeEndY, 2, '#5d6d7e');
-      this.drawArrow(attachX, attachY, Math.atan2(attachY - causeEndY, attachX - causeEndX) * 180 / Math.PI, 7, '#5d6d7e');
+      this.drawArrow(attachX, attachY, 180, 8, '#5d6d7e');
 
-      // ラベル
+      // ラベル（中骨の先端、少し上または下）
       const labelG = this.group();
-      const labelOffsetY = side * (isTop ? -1 : 1) > 0 ? -10 : 14;
-      labelG.appendChild(this.text(causeEndX, causeEndY + labelOffsetY, cause.name, 11, '600', '#2c3e50'));
+      const labelY = causeEndY + (isTop ? -12 : 14);
+      labelG.appendChild(this.text(causeEndX, labelY, cause.name, 11, '600', '#2c3e50'));
       this.makeDraggable(labelG);
       this.mainGroup.appendChild(labelG);
 
       // 小骨
-      this.drawSubcauses(cause.subcauses, attachX, attachY, causeEndX, causeEndY, side, i);
+      this.drawSubcauses(cause.subcauses, attachX, attachY, causeEndX, causeEndY, isTop, i);
     });
   }
 
-  drawSubcauses(subcauses, startX, startY, endX, endY, parentSide, causeIdx) {
+  drawSubcauses(subcauses, startX, startY, endX, endY, isTop, causeIdx) {
     const n = subcauses.length;
     if (n === 0) return;
 
-    // 中骨のベクトル
+    // 中骨のベクトル（水平）
     const dx = endX - startX;
-    const dy = endY - startY;
-    const len = Math.sqrt(dx * dx + dy * dy);
+    const len = Math.abs(dx);
 
     // 小骨の長さ
-    const subLen = Math.min(len * 0.5, 40);
+    const subLen = Math.min(len * 0.45, 35);
 
-    // 小骨の角度（中骨に対して55度）
-    const subAngle = 55 * Math.PI / 180;
+    // 小骨の角度（中骨に対して斜め上または下）
+    const subAngle = 50 * Math.PI / 180;
 
     subcauses.forEach((sub, i) => {
       // 中骨上の位置
       const t = (i + 1) / (n + 1);
       const attachX = startX + dx * t;
-      const attachY = startY + dy * t;
+      const attachY = startY;
 
-      // 交互に上下
-      const side = ((i + causeIdx) % 2 === 0) ? 1 : -1;
+      // 上側カテゴリーなら上向き、下側なら下向き
+      const side = isTop ? -1 : 1;
 
-      // 小骨の方向（中骨に対して斜め）
-      const ux = dx / len;
-      const uy = dy / len;
-      const cos = Math.cos(subAngle * side);
-      const sin = Math.sin(subAngle * side);
-      const subDirX = ux * cos - uy * sin;
-      const subDirY = ux * sin + uy * cos;
-
-      const subEndX = attachX + subDirX * subLen;
-      const subEndY = attachY + subDirY * subLen;
+      // 小骨の方向
+      const subEndX = attachX - subLen * Math.cos(subAngle);
+      const subEndY = attachY + side * subLen * Math.sin(subAngle);
 
       // 小骨を描画
-      this.drawLine(attachX, attachY, subEndX, subEndY, 1.3, '#7f8c8d');
+      this.drawLine(attachX, attachY, subEndX, subEndY, 1.5, '#7f8c8d');
       this.drawArrow(attachX, attachY, Math.atan2(attachY - subEndY, attachX - subEndX) * 180 / Math.PI, 5, '#7f8c8d');
 
       // ラベル
       const labelG = this.group();
-      const labelY = subEndY + (side > 0 ? -8 : 12);
+      const labelY = subEndY + (side < 0 ? -8 : 12);
       labelG.appendChild(this.text(subEndX, labelY, sub.name, 9, 'normal', '#34495e'));
       this.makeDraggable(labelG);
       this.mainGroup.appendChild(labelG);
 
       // 孫骨
-      this.drawDetails(sub.details, attachX, attachY, subEndX, subEndY, i);
+      this.drawDetails(sub.details, attachX, attachY, subEndX, subEndY, isTop, i);
     });
   }
 
-  drawDetails(details, startX, startY, endX, endY, subIdx) {
+  drawDetails(details, startX, startY, endX, endY, isTop, subIdx) {
     const n = details.length;
     if (n === 0) return;
 
@@ -199,26 +187,24 @@ class IshikawaDiagram {
     const dy = endY - startY;
     const len = Math.sqrt(dx * dx + dy * dy);
 
-    const detLen = 25;
+    const detLen = 22;
 
-    // 垂直方向
-    const perpX = -dy / len;
-    const perpY = dx / len;
+    // 孫骨は小骨に対して同じ方向（上側カテゴリーなら上、下側なら下）
+    const side = isTop ? -1 : 1;
 
     details.forEach((det, i) => {
       const t = (i + 1) / (n + 1);
       const attachX = startX + dx * t;
       const attachY = startY + dy * t;
 
-      const side = ((i + subIdx) % 2 === 0) ? 1 : -1;
-
-      const detEndX = attachX + perpX * detLen * side;
-      const detEndY = attachY + perpY * detLen * side;
+      // 垂直方向に配置
+      const detEndX = attachX;
+      const detEndY = attachY + side * detLen;
 
       this.drawLine(attachX, attachY, detEndX, detEndY, 0.8, '#95a5a6');
 
       const labelG = this.group();
-      const labelY = detEndY + (side > 0 ? -6 : 10);
+      const labelY = detEndY + (side < 0 ? -6 : 10);
       labelG.appendChild(this.text(detEndX, labelY, det, 8, 'normal', '#666'));
       this.makeDraggable(labelG);
       this.mainGroup.appendChild(labelG);
@@ -226,21 +212,21 @@ class IshikawaDiagram {
   }
 
   drawEffectBox(x, spineY, height, text) {
-    const boxW = 65;
-    const boxH = Math.min(height * 0.5, 380);
+    const boxW = 70;
+    const boxH = Math.min(height * 0.45, 350);
     const boxY = spineY - boxH / 2;
 
     const g = this.group();
     g.appendChild(this.rect(x, boxY, boxW, boxH, '#c0392b', 6));
 
-    const fontSize = 16;
-    const lineH = fontSize + 4;
+    const fontSize = 17;
+    const lineH = fontSize + 5;
     const maxChars = Math.floor((boxH - 40) / lineH);
 
     text.split('').slice(0, maxChars).forEach((c, i) => {
       const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
       t.setAttribute('x', x + boxW / 2);
-      t.setAttribute('y', boxY + 28 + i * lineH);
+      t.setAttribute('y', boxY + 30 + i * lineH);
       t.setAttribute('font-size', fontSize);
       t.setAttribute('font-weight', 'bold');
       t.setAttribute('fill', 'white');
