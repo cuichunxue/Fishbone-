@@ -175,17 +175,21 @@ button {
   display: flex;
   justify-content: center;
   align-items: center;
-  min-height: 600px;
+  min-height: 550px;
+  max-height: 80vh;
+  overflow: auto;
 }
 
 #diagramContainer svg {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+  border-radius: 10px;
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
   -moz-user-select: none;
   -ms-user-select: none;
+  background: linear-gradient(180deg, #ffffff 0%, #fafbfc 100%);
+  border: 1px solid #e1e4e8;
 }
 
 /* 空の状態 */
