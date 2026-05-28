@@ -155,11 +155,24 @@ class IshikawaDiagram {
       `${this.viewBox.x} ${this.viewBox.y} ${this.viewBox.width} ${this.viewBox.height}`
     );
     this.svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    this.svg.setAttribute('shape-rendering', 'geometricPrecision');
     this.svg.style.border = '1px solid #ddd';
     this.svg.style.backgroundColor = this.style.bg;
     this.svg.style.cursor = 'default';
     this.svg.style.touchAction = 'none';
     this.svg.style.maxHeight = '100vh';
+
+    // defs: drop shadow filter for boxes
+    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+    defs.innerHTML = `
+      <filter id="boxShadow" x="-20%" y="-20%" width="140%" height="140%">
+        <feGaussianBlur in="SourceAlpha" stdDeviation="2"/>
+        <feOffset dx="0" dy="1.5" result="offsetblur"/>
+        <feComponentTransfer><feFuncA type="linear" slope="0.25"/></feComponentTransfer>
+        <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+    `;
+    this.svg.appendChild(defs);
 
     this.mainGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     this.svg.appendChild(this.mainGroup);
@@ -796,6 +809,7 @@ class IshikawaDiagram {
       x, y, eff.width, eff.height,
       this.style.effectFill, this.style.effectStroke, 2, 6
     );
+    rect.setAttribute('filter', 'url(#boxShadow)');
     group.appendChild(rect);
 
     if (eff.mode === 'horizontal') {
@@ -874,6 +888,7 @@ class IshikawaDiagram {
       bx, by, bw, bh,
       this.style.categoryFill, this.style.categoryStroke, 2, 6
     );
+    rect.setAttribute('filter', 'url(#boxShadow)');
     group.appendChild(rect);
     const txt = this.createText(
       info.boxCenter.x, info.boxCenter.y,
