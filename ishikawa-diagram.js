@@ -99,7 +99,7 @@ class IshikawaDiagram {
       spineEndPadding: 110,
       innerSafeMargin: 26,
       // 両側配置の判定閾値: 大骨長がこれを超えるなら片側配置に切替
-      bothSidesMaxBoneLength: 1500,
+      bothSidesMaxBoneLength: 1800,
       // 最小描画範囲 (空きカテゴリでも視覚を保つ)
       minCanvasHeight: 600,
       minCanvasWidth: 900,
@@ -263,12 +263,18 @@ class IshikawaDiagram {
         : 0;
 
       // === 大骨長を 2 通り計算して、両側 / 片側を選択 ===
+      // 新ルール: 小骨は上下交互に展開するため、
+      //   隣接中骨間で「DOWN 小骨 + UP 小骨」が衝突しないよう
+      //   縦方向の中骨間隔が 2 × 小骨垂直展開 以上必要
+      const verticalNeedBetweenCauses = hasAnySubcauses
+        ? (2 * subLenLong * sinS + 50)  // 上下両方向の小骨 + ラベル分
+        : 60;
+
       // 両側配置: ペア間隔 (縦) + 内側中骨が背骨に達しない条件
       const pairTRange = p.pairTMax - p.pairTMin;
-      const requiredVerticalSpacingBoth = subVertical + 40;
       const requiredMajorByVerticalBoth = numPairs <= 1
         ? 0
-        : requiredVerticalSpacingBoth * (numPairs - 1) / (sinA * pairTRange);
+        : verticalNeedBetweenCauses * (numPairs - 1) / (sinA * pairTRange);
       // 内側中骨は中骨本体+小骨水平+孫骨水平が背骨に届かないように
       const innerHorizontalNeed =
         causeLength + subHorizontalOuter + detailHorizontalOuter + p.innerSafeMargin;
@@ -281,10 +287,9 @@ class IshikawaDiagram {
 
       // 片側配置 (フォールバック): すべての中骨が外側に伸びる
       const singleTRange = p.singleTMax - p.singleTMin;
-      const requiredVerticalSpacingSingle = subVertical + 28;
       const requiredMajorByVerticalSingle = numCauses <= 1
         ? 0
-        : requiredVerticalSpacingSingle * (numCauses - 1) / (sinA * singleTRange);
+        : verticalNeedBetweenCauses * (numCauses - 1) / (sinA * singleTRange);
       const requiredMajorBySpacingSingle = numCauses <= 1
         ? 0
         : p.causeSpacingAlongBone * (numCauses - 1) / singleTRange;
@@ -609,7 +614,7 @@ class IshikawaDiagram {
       const startX = attachX + direction * causeLen; // 中骨の free end
       const startY = attachY;
 
-      // 小骨レイアウト (side 情報を伝搬)
+      // 小骨レイアウト (side 情報と背骨 Y を伝搬)
       const causeMetric = info.causeMetrics[i] || {};
       const subInfos = this.computeSubcauseGeometry(
         cause,
@@ -618,6 +623,8 @@ class IshikawaDiagram {
           isTop: info.isTop,
           side,
           direction,
+          spineY,
+          spineX: info.spineX,
           subLen: causeMetric.subLen || info.subLenLong,
         },
         subRad, sinS, cosS,
@@ -634,8 +641,14 @@ class IshikawaDiagram {
 
   /**
    * ある中骨上の小骨レイアウト
-   * 小骨は中骨上の subcauseTMin..subcauseTMax の範囲に均等配置。
-   * 全ての小骨は外側方向（上側カテゴリなら上向き、下側なら下向き）に伸びる。
+   *
+   * ルール: 中骨は水平なので、小骨は上下交互に展開する
+   *   - 偶数番目 (i=0,2,...): 外側 (TOP カテゴリでは上、BOTTOM では下)
+   *   - 奇数番目 (i=1,3,...): 内側 (背骨側)
+   *
+   * 水平方向: 中骨の direction と同じ (LEFT 中骨 → 左斜め、RIGHT 中骨 → 右斜め)
+   *
+   * 内側へ伸びる小骨が背骨を越えないよう、長さを安全に制限する。
    */
   computeSubcauseGeometry(cause, ctx, subRad, sinS, cosS) {
     const p = this.params;
@@ -643,26 +656,41 @@ class IshikawaDiagram {
     if (!subs.length) return [];
 
     const ts = this.computeEvenT(subs.length, p.subcauseTMin, p.subcauseTMax);
-    const verticalDir = ctx.isTop ? -1 : 1;
-    // 小骨の水平方向: 中骨の direction と同じ向きに伸びる
-    // (中骨が左に伸びるなら小骨も左斜め、右に伸びるなら右斜め)
     const horizontalDir = ctx.direction;
+    // 内側小骨が背骨にぶつからないよう、最大長を概算
+    // 中骨の Y 座標 (cause line Y) と背骨 Y の距離 = |attachY - spineY|
+    // 内側小骨先端の Y = attachY + sign * len * sinS が背骨を越えないこと
+    const distToSpineY = Math.abs(ctx.attachY - (ctx.spineY ?? 0));
+    const innerSubMaxLen =
+      distToSpineY > 0
+        ? Math.max(40, (distToSpineY - p.innerSafeMargin) / sinS)
+        : ctx.subLen;
 
     return subs.map((sub, i) => {
       const t = ts[i];
-      // 中骨上の attach 座標 (中骨は水平: startX <-> attachX, 順序は side で異なる)
       const attachX = ctx.startX + (ctx.attachX - ctx.startX) * t;
       const attachY = ctx.startY;
 
-      // 小骨長: 奇数番目を短くしてラベルを縦にずらす（重なり回避）
-      // ただし孫骨を持つ場合は短くしない
+      // 上下交互 (i=0 → 外側、i=1 → 内側)
+      const isOuterSub = (i % 2 === 0);
+      const verticalDir = ctx.isTop
+        ? (isOuterSub ? -1 : +1)
+        : (isOuterSub ? +1 : -1);
+
       const hasDetails = sub.details && sub.details.length > 0;
       const lenBase = ctx.subLen;
-      const lenStaggered = hasDetails
-        ? lenBase
-        : (i % 2 === 1 ? lenBase * p.subcauseStaggerRatio : lenBase);
-      const len = lenStaggered;
-      // 小骨は外側方向に進む (横方向は中骨と同じ向き、縦方向はカテゴリ外側)
+      // 外側は通常長、内側は安全長 (背骨に届かない長さ) と通常長の小さい方
+      let len;
+      if (isOuterSub) {
+        len = lenBase;
+      } else {
+        // 内側は背骨方向。背骨に届かないようキャップ
+        const cap = Math.min(lenBase, innerSubMaxLen);
+        // 孫骨を持たない場合は更に少し短く (ラベル衝突回避のためのスタガー)
+        len = hasDetails ? cap : cap * p.subcauseStaggerRatio;
+      }
+      // 外側でも、孫骨が無い場合は偶奇でスタガーを残す (ただし上下交互で既にずれるので無効化)
+
       const dx = horizontalDir * len * cosS;
       const dy = verticalDir * len * sinS;
       const endX = attachX + dx;
@@ -683,30 +711,35 @@ class IshikawaDiagram {
       return {
         sub,
         attachX, attachY, endX, endY,
-        len, verticalDir, horizontalDir,
+        len, verticalDir, horizontalDir, isOuterSub,
         detailInfos,
       };
     });
   }
 
   /**
-   * 孫骨は小骨ライン上に分岐し、中骨と同じ水平方向に伸ばす。
-   * これによりラベルが小骨ラベル(先端)と衝突しない。
+   * 孫骨は小骨ライン上に分岐する。
+   * ルール: 小骨は斜め骨 ⇒ 孫骨は左右交互に展開する
+   *   - 偶数番目 (i=0,2,...): 小骨の進行方向と同じ向き (外側)
+   *   - 奇数番目 (i=1,3,...): 反対向き (内側)
+   * これにより、隣接する孫骨ラベルがX方向に離れて重なり回避になる。
    */
   computeDetailGeometry(sub, ctx) {
     const p = this.params;
     if (!sub.details.length) return [];
 
     const ts = this.computeEvenT(sub.details.length, p.detailTMin, p.detailTMax);
-    const horizontalDir = ctx.horizontalDir;
+    const parentDir = ctx.horizontalDir; // 小骨が向いている水平方向
 
     return sub.details.map((detail, i) => {
       const t = ts[i];
-      // 小骨ライン上の attach 座標
       const attachX = ctx.attachX + (ctx.endX - ctx.attachX) * t;
       const attachY = ctx.attachY + (ctx.endY - ctx.attachY) * t;
 
-      // 孫骨は中骨と同じ水平方向に伸ばす
+      // 左右交互 (偶数=外側=parentDir, 奇数=内側=-parentDir)
+      const isOuterDetail = (i % 2 === 0);
+      const horizontalDir = isOuterDetail ? parentDir : -parentDir;
+
       const startX = attachX + horizontalDir * p.detailLength;
       const startY = attachY;
 
@@ -716,6 +749,7 @@ class IshikawaDiagram {
         startX, startY,
         verticalDir: ctx.verticalDir,
         horizontalDir,
+        isOuterDetail,
       };
     });
   }
