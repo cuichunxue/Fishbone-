@@ -87,9 +87,14 @@ class IshikawaDiagram {
 
       causeSpacingAlongBone: 110,
       subcauseSpacingAlongCause: 80,
+
+      // 親骨の長さは "展開される子骨の本数" の 2 本ごとに段階的に伸ばす
+      //   length = base + max(0, ceil(N/2) - 1) * stepPerPair
       causeBaseLength: 180,
+      causeLengthPerPair: 80,           // 中骨: 小骨ペアごとの追加長
       subcauseLength: 108,
-      subcauseLengthWithDetails: 132,
+      subcauseLengthPerPair: 30,        // 小骨: 孫骨ペアごとの追加長
+      subcauseLengthWithDetails: 132,   // 互換用 (使用していない箇所のフォールバック)
       detailLength: 56,
       categoryBoxWidth: 140,
       categoryBoxHeight: 48,
@@ -215,17 +220,32 @@ class IshikawaDiagram {
           ? Math.max(...cause.subcauses.map(s => this.estimateTextWidth(s.name, p.fontPx.subcause)))
           : 0;
 
-        // 小骨ラベル間の最低水平間隔を確保するための中骨長
+        // 小骨は上下交互配置なので同じ側 (UP/DOWN それぞれ) の隣接小骨は
+        // index 差 2 で並ぶ。よって X 間隔は 2*tStep として算出する。
         const labelSafeSpacing = maxSubLabel + 24;
         const subLayoutLen = numSub >= 2
-          ? labelSafeSpacing * (numSub - 1) / tSubRange
-          : (numSub === 1 ? 160 : 0);
+          ? labelSafeSpacing * (numSub - 1) / (2 * tSubRange)
+          : (numSub === 1 ? 140 : 0);
+
+        // 中骨長: base + ceil(numSub/2 - 1) * stepPerPair (展開ペアごとの伸縮)
+        const subPairs = Math.ceil(numSub / 2);
+        const causeLenByPair = p.causeBaseLength
+          + Math.max(0, subPairs - 1) * p.causeLengthPerPair;
         const subSpread = numSub > 0
-          ? Math.max(subLayoutLen, p.subcauseSpacingAlongCause * (numSub - 1) + 80)
+          ? Math.max(subLayoutLen, causeLenByPair)
           : 0;
 
+        // 小骨長: base + ceil(numDetails/2 - 1) * stepPerPair (孫骨ペアごと)
+        // カテゴリ内最大の小骨長を採用
+        const subLensPerSub = cause.subcauses.map(s => {
+          const dPairs = Math.ceil(s.details.length / 2);
+          return p.subcauseLength
+            + Math.max(0, dPairs - 1) * p.subcauseLengthPerPair;
+        });
+        const subLen = subLensPerSub.length
+          ? Math.max(p.subcauseLength, ...subLensPerSub)
+          : p.subcauseLength;
         const hasDetails = cause.subcauses.some(s => s.details.length > 0);
-        const subLen = hasDetails ? p.subcauseLengthWithDetails : p.subcauseLength;
 
         const maxDetailLabel = cause.subcauses.flatMap(s => s.details).length > 0
           ? Math.max(0, ...cause.subcauses.flatMap(s =>
