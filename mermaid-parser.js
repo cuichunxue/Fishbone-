@@ -145,13 +145,16 @@ class MermaidParser {
       }
     }
 
-    // 各カテゴリーで中骨を最大4本、小骨を最大3本、孫骨を最大2本に制限
+    // 視認性のための安全上限（極端なデータでもレイアウトを保つ）
+    const MAX_CAUSES = 6;
+    const MAX_SUBCAUSES = 4;
+    const MAX_DETAILS = 3;
     for (const category of orderedCategories) {
-      category.causes = category.causes.slice(0, 4);
+      category.causes = category.causes.slice(0, MAX_CAUSES);
       for (const cause of category.causes) {
-        cause.subcauses = cause.subcauses.slice(0, 3);
+        cause.subcauses = cause.subcauses.slice(0, MAX_SUBCAUSES);
         for (const subcause of cause.subcauses) {
-          subcause.details = subcause.details.slice(0, 2);
+          subcause.details = subcause.details.slice(0, MAX_DETAILS);
         }
       }
     }
