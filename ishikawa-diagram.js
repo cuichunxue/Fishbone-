@@ -71,8 +71,10 @@ class IshikawaDiagram {
       subcauseAngleDeg: 50,        // 小骨の傾き
 
       // ペア配置 (両側) 用 t 範囲
-      pairTMin: 0.42,
-      pairTMax: 0.92,
+      // pairTMin が高い ⇒ 内側中骨にゆとり、大骨長が短い
+      // pairTMax が低い ⇒ 縦キャンバスが短い
+      pairTMin: 0.48,
+      pairTMax: 0.88,
       // 片側配置 (フォールバック) 用 t 範囲
       singleTMin: 0.18,
       singleTMax: 0.84,
@@ -97,7 +99,10 @@ class IshikawaDiagram {
       spineEndPadding: 110,
       innerSafeMargin: 26,
       // 両側配置の判定閾値: 大骨長がこれを超えるなら片側配置に切替
-      bothSidesMaxBoneLength: 1700,
+      bothSidesMaxBoneLength: 1500,
+      // 最小描画範囲 (空きカテゴリでも視覚を保つ)
+      minCanvasHeight: 600,
+      minCanvasWidth: 900,
 
       fontPx: {
         effect: 22,
@@ -276,34 +281,6 @@ class IshikawaDiagram {
         requiredMajorBySpacingSingle,
       );
 
-      // 両側がキャンバスを膨大にしすぎる場合は片側にフォールバック
-      // 中骨が 1 本だけのカテゴリは片側にする (ペアにならない)
-      const useBothSides =
-        numCauses >= 2 && majorByBothSides <= p.bothSidesMaxBoneLength;
-      const majorBoneLength = useBothSides ? majorByBothSides : majorBySingleSide;
-      const layoutMode = useBothSides ? 'pair' : 'single';
-
-      const tMaxForExtents = useBothSides ? p.pairTMax : p.singleTMax;
-
-      // 縦方向の最大張り出し: 最も先端側の中骨から小骨が突き出す
-      const farthestCauseY = majorBoneLength * sinA * tMaxForExtents;
-      const categoryVertical = farthestCauseY + subVertical + 24;
-
-      const majorHorizontal = majorBoneLength * cosA;
-      const categoryBoxHorizontal = p.categoryBoxWidth * 0.55;
-
-      // 横方向の最大張り出し:
-      //   - 外側中骨: spineX から大骨先端側に causeLen + 小骨水平 + 孫骨水平
-      const farLeftFromSpine =
-        majorBoneLength * cosA * tMaxForExtents +
-        causeLength +
-        subHorizontalOuter +
-        detailHorizontalOuter;
-      const horizontalExtentFromSpine = Math.max(
-        majorHorizontal + categoryBoxHorizontal + 24,
-        farLeftFromSpine + 20,
-      );
-
       return {
         category: cat,
         idx,
@@ -313,17 +290,57 @@ class IshikawaDiagram {
         causeLength,
         causeMetrics,
         subLenLong,
-        majorBoneLength,
-        majorHorizontal,
-        farthestCauseY,
-        categoryVertical,
-        horizontalExtentFromSpine,
+        majorByBothSides,
+        majorBySingleSide,
+        // 以降は最終 globalL 決定後に再計算
+        majorBoneLength: 0,
+        majorHorizontal: 0,
+        farthestCauseY: 0,
+        categoryVertical: 0,
+        horizontalExtentFromSpine: 0,
+        layoutMode: null,
         subHorizontalOuter,
         detailHorizontalOuter,
         subVertical,
         maxDetailLabelGlobal,
-        layoutMode,
+        hasAnySubcauses,
+        hasAnyDetails,
       };
+    });
+
+    // ---- カテゴリごとのモードと統一大骨長を決定 ----
+    // ルール:
+    //   1. 中骨 1 本のカテゴリ: 常に S (ペア不可)
+    //   2. 中骨 2 本以上で両側配置が閾値内: P
+    //   3. それ以外: S (フォールバック)
+    // 統一 L = 全カテゴリの選択モードでの必要 L の最大値
+    //   ⇒ 大骨先端 Y がカテゴリ間で揃い、視覚バランスが取れる
+    categoryInfos.forEach(c => {
+      c.layoutMode =
+        (c.numCauses >= 2 && c.majorByBothSides <= p.bothSidesMaxBoneLength)
+          ? 'pair' : 'single';
+    });
+    const globalL = Math.max(500, ...categoryInfos.map(c =>
+      c.layoutMode === 'pair' ? c.majorByBothSides : c.majorBySingleSide
+    ));
+
+    // 各カテゴリに統一 L を適用し、派生量を計算
+    categoryInfos.forEach(info => {
+      info.majorBoneLength = globalL;
+      const tMaxForExtents = (info.layoutMode === 'pair')
+        ? p.pairTMax : p.singleTMax;
+      info.farthestCauseY = globalL * sinA * tMaxForExtents;
+      info.categoryVertical = info.farthestCauseY + info.subVertical + 24;
+      info.majorHorizontal = globalL * cosA;
+      const farLeftFromSpine =
+        globalL * cosA * tMaxForExtents +
+        info.causeLength +
+        info.subHorizontalOuter +
+        info.detailHorizontalOuter;
+      info.horizontalExtentFromSpine = Math.max(
+        info.majorHorizontal + p.categoryBoxWidth * 0.55 + 24,
+        farLeftFromSpine + 20,
+      );
     });
 
     // 2) 上下別の最大値を取得
@@ -341,10 +358,14 @@ class IshikawaDiagram {
     const effectLayoutEarly = this.computeEffectBoxLayout(data.effect || '');
     const minHalfForEffect = effectLayoutEarly.height / 2 + 40;
 
-    const halfHeightTop = Math.max(maxVerticalTop + p.verticalMargin, minHalfForEffect);
-    const halfHeightBot = Math.max(maxVerticalBot + p.verticalMargin, minHalfForEffect);
-    const svgHeight = halfHeightTop + halfHeightBot;
-    const spineY = halfHeightTop;
+    const halfHeightTopRaw = Math.max(maxVerticalTop + p.verticalMargin, minHalfForEffect);
+    const halfHeightBotRaw = Math.max(maxVerticalBot + p.verticalMargin, minHalfForEffect);
+    // 背骨を常にキャンバスの上下中央に配置する (左右対称な見た目を維持)
+    const halfHeight = Math.max(
+      halfHeightTopRaw, halfHeightBotRaw, p.minCanvasHeight / 2
+    );
+    const svgHeight = halfHeight * 2;
+    const spineY = halfHeight;
 
     // 3) 同じ側で隣接するカテゴリの spine X 間隔を決定
     // 隣接 spine X 間隔は、両カテゴリの horizontalExtentFromSpine を考慮して決める
@@ -431,14 +452,25 @@ class IshikawaDiagram {
     const effectLayout = this.computeEffectBoxLayout(effectText);
     const effectX = spineEndX + p.effectGap;
 
-    // 6) SVG 全体の幅
-    const svgWidth =
-      effectX + effectLayout.width + p.sideMarginX;
+    // 6) SVG 全体の幅 (アスペクト比下限を満たすよう左右パディング)
+    let svgWidth = effectX + effectLayout.width + p.sideMarginX;
+    let spineStartX = p.sideMarginX;
+    let effectXFinal = effectX;
+    let spineEndXFinal = spineEndX;
 
-    // 背骨 X 開始
-    const spineStartX = p.sideMarginX;
+    // 最低アスペクト比を確保: ポートレート気味の図に水平余白を加えバランスを取る
+    const minAspect = 1.15;
+    if (svgWidth / svgHeight < minAspect) {
+      const targetWidth = svgHeight * minAspect;
+      const shift = (targetWidth - svgWidth) / 2;
+      spineStartX += shift;
+      spineEndXFinal += shift;
+      effectXFinal += shift;
+      categoryInfos.forEach(c => { c.spineX += shift; });
+      svgWidth = targetWidth;
+    }
 
-    // 7) 各カテゴリの大骨と原因の座標を計算
+    // 7) 各カテゴリの大骨と原因の座標を計算 (シフト後の spineX を反映)
     categoryInfos.forEach(info => {
       this.computeCategoryGeometry(info, spineY, rad, sinA, cosA, subRad, sinS, cosS);
     });
@@ -448,9 +480,9 @@ class IshikawaDiagram {
       svgHeight,
       spineY,
       spineStartX,
-      spineEndX,
+      spineEndX: spineEndXFinal,
       categoryInfos,
-      effectX,
+      effectX: effectXFinal,
       effectY: spineY,
       effectLayout,
       angleRad: rad,

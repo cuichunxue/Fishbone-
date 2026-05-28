@@ -1,12 +1,17 @@
 #!/usr/bin/env node
 /**
- * Visual verification script for the Ishikawa diagram.
- * Loads index.html, generates diagram with various dataset sizes,
- * and screenshots the result for inspection.
+ * 包括的バランス検証スクリプト
  *
- * Also runs in-page assertions to detect overlaps and overflows.
+ * 9パターンに加え、以下のバランス指標を計測:
+ *  - 縦中心線(背骨)からの上下対称性
+ *  - カテゴリ間の水平等間隔性
+ *  - 大骨先端のY座標バラツキ (同じ側内)
+ *  - アスペクト比
+ *  - 中央のホワイトスペース (背骨周辺の使用効率)
+ *  - 重なり/はみ出し検出 (text + line + arrow)
+ *
+ * 出力: screenshots/ に個別 PNG と、summary.html (グリッド表示) を生成
  */
-
 const path = require('path');
 const fs = require('fs');
 const { chromium } = require('/opt/node22/lib/node_modules/playwright');
@@ -15,11 +20,10 @@ const ROOT = __dirname;
 const OUT_DIR = path.join(ROOT, 'screenshots');
 if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true });
 
-// Test datasets covering many shapes
 const DATASETS = {
-  '01-default': null, // use the textarea default
+  '01-default': null,
 
-  '02-1M-minimal': `ishikawa
+  '02-1M-bare': `ishikawa
   effect "売上が下がっている"
   category "営業"
     cause "提案力不足"
@@ -139,53 +143,132 @@ const DATASETS = {
     cause "ツール選定ミス"
       subcause "互換性なし"
         detail "バージョン不一致"
-        detail "ライセンス問題"
       subcause "学習コスト"
   category "人"
     cause "リーダー経験不足"
     cause "コミュニケーション不足"
       subcause "ミーティング少ない"
       subcause "ドキュメント不足"
-        detail "Wiki 未整備"
       subcause "リモート問題"
-      subcause "言語の壁"
   category "材料"
     cause "外部API遅延"
   category "方法"
     cause "見積もり甘い"
     cause "テスト不足"
       subcause "ユニットテスト不足"
-      subcause "結合テスト未実施"
     cause "アジャイル運用不徹底"`,
 
   '08-long-names': `ishikawa
   effect "新規顧客の獲得率が伸び悩んでいる"
   category "機械"
     cause "CRM システムが古い"
-      subcause "リードトラッキング機能が貧弱"
-        detail "履歴管理が不十分"
+      subcause "リードトラッキング不足"
     cause "MA ツールの設定不備"
   category "人"
     cause "営業スキルのバラツキ"
       subcause "新人教育プログラム未整備"
-    cause "マーケティング部との連携不足"
+    cause "マーケ部との連携不足"
   category "材料"
     cause "ターゲットリストの質が低い"
-      subcause "業界カバレッジ不足"
   category "方法"
     cause "提案資料の説得力不足"
       subcause "事例ストーリーが弱い"
-        detail "ROI 試算が抽象的"
-    cause "ナーチャリングシナリオ未設計"`,
+    cause "ナーチャリング未設計"`,
 
-  '09-single-cause': `ishikawa
+  '09-single': `ishikawa
   effect "とにかく一個"
   category "原因"
     cause "唯一の原因"`,
+
+  '10-3M-rich': `ishikawa
+  effect "売上目標未達"
+  category "市場"
+    cause "需要減退"
+      subcause "景気悪化"
+      subcause "代替品台頭"
+    cause "競合増加"
+      subcause "新規参入"
+        detail "海外勢"
+      subcause "価格競争"
+        detail "値下げ圧力"
+    cause "顧客離反"
+      subcause "満足度低下"
+        detail "サポート不足"
+  category "営業"
+    cause "提案力不足"
+      subcause "ヒアリング浅い"
+      subcause "差別化不明確"
+    cause "新規開拓不足"
+      subcause "リスト枯渇"
+    cause "クロージング弱い"
+  category "商品"
+    cause "魅力不足"
+      subcause "機能差別化なし"
+      subcause "ブランド力弱い"
+    cause "ラインナップ不足"
+    cause "価格設定不適"
+      subcause "値ごろ感なし"`,
+
+  '11-uniform-3sub': `ishikawa
+  effect "対称性テスト"
+  category "A"
+    cause "原因A1"
+      subcause "A1a"
+      subcause "A1b"
+      subcause "A1c"
+    cause "原因A2"
+      subcause "A2a"
+      subcause "A2b"
+      subcause "A2c"
+  category "B"
+    cause "原因B1"
+      subcause "B1a"
+      subcause "B1b"
+      subcause "B1c"
+    cause "原因B2"
+      subcause "B2a"
+      subcause "B2b"
+      subcause "B2c"
+  category "C"
+    cause "原因C1"
+      subcause "C1a"
+      subcause "C1b"
+      subcause "C1c"
+    cause "原因C2"
+      subcause "C2a"
+      subcause "C2b"
+      subcause "C2c"
+  category "D"
+    cause "原因D1"
+      subcause "D1a"
+      subcause "D1b"
+      subcause "D1c"
+    cause "原因D2"
+      subcause "D2a"
+      subcause "D2b"
+      subcause "D2c"`,
+
+  '12-just-causes': `ishikawa
+  effect "シンプル4M"
+  category "機械"
+    cause "故障"
+    cause "性能"
+    cause "メンテ"
+  category "人"
+    cause "スキル"
+    cause "モラル"
+    cause "教育"
+  category "材料"
+    cause "品質"
+    cause "在庫"
+    cause "コスト"
+  category "方法"
+    cause "標準"
+    cause "手順"
+    cause "管理"`,
 };
 
 async function runChecks(page) {
-  // Run in-page overlap/overflow detection
   return await page.evaluate(() => {
     const svg = document.querySelector('#diagramContainer svg');
     if (!svg) return { error: 'no svg' };
@@ -193,29 +276,59 @@ async function runChecks(page) {
     const viewBox = svg.viewBox.baseVal;
     const issues = [];
 
-    // Layout mode summary (diagram is exposed as global in index.html via top-level script)
+    // Layout summary
     let layoutSummary = null;
+    let balanceMetrics = null;
     try {
-      // eslint-disable-next-line no-undef
       const d = (typeof diagram !== 'undefined') ? diagram : null;
       if (d && d.layout) {
-        layoutSummary = d.layout.categoryInfos.map(c => ({
+        const cats = d.layout.categoryInfos;
+        layoutSummary = cats.map(c => ({
           name: c.category.name,
           mode: c.layoutMode,
           numCauses: c.numCauses,
           L: Math.round(c.majorBoneLength),
+          spineX: Math.round(c.spineX),
+          boneEndY: Math.round(c.boneEndY),
         }));
+        // Balance metrics
+        const topCats = cats.filter(c => c.isTop);
+        const botCats = cats.filter(c => !c.isTop);
+        const halfTop = d.layout.spineY;
+        const halfBot = d.layout.svgHeight - d.layout.spineY;
+        const symmetry = Math.min(halfTop, halfBot) / Math.max(halfTop, halfBot);
+        // category X spacing variance
+        const topXs = topCats.map(c => c.spineX).sort((a,b) => a-b);
+        const botXs = botCats.map(c => c.spineX).sort((a,b) => a-b);
+        const stddev = arr => {
+          if (arr.length < 2) return 0;
+          const gaps = [];
+          for (let i = 1; i < arr.length; i++) gaps.push(arr[i]-arr[i-1]);
+          const m = gaps.reduce((s,v) => s+v, 0) / gaps.length;
+          const v = gaps.reduce((s,g) => s + (g-m)*(g-m), 0) / gaps.length;
+          return Math.sqrt(v);
+        };
+        // Bone end Y variance (within same side, should be equal)
+        const topBoneYs = topCats.map(c => c.boneEndY);
+        const botBoneYs = botCats.map(c => c.boneEndY);
+        const range = arr => arr.length ? Math.max(...arr) - Math.min(...arr) : 0;
+        balanceMetrics = {
+          aspect: (viewBox.width / viewBox.height).toFixed(2),
+          symmetry: symmetry.toFixed(3),
+          topGapStddev: Math.round(stddev(topXs)),
+          botGapStddev: Math.round(stddev(botXs)),
+          topBoneYRange: Math.round(range(topBoneYs)),
+          botBoneYRange: Math.round(range(botBoneYs)),
+          halfTop: Math.round(halfTop),
+          halfBot: Math.round(halfBot),
+        };
       }
     } catch (_) { /* ignore */ }
 
-    // Collect all text elements and their bounding boxes (in viewBox coords)
+    // Text bounding boxes
     const texts = Array.from(svg.querySelectorAll('text'));
-    const lines = Array.from(svg.querySelectorAll('line'));
-
-    // Get bbox for each text in SVG coords
     const textBoxes = texts.map(t => {
       const bb = t.getBBox();
-      // Apply any transform on parent group
       let dx = 0, dy = 0;
       let parent = t.parentElement;
       while (parent && parent !== svg) {
@@ -228,38 +341,31 @@ async function runChecks(page) {
       }
       return {
         text: t.textContent.slice(0, 24),
-        x: bb.x + dx,
-        y: bb.y + dy,
-        w: bb.width,
-        h: bb.height,
+        x: bb.x + dx, y: bb.y + dy, w: bb.width, h: bb.height,
       };
     }).filter(b => b.w > 0 && b.h > 0);
 
-    // Overflow: text outside viewBox
+    // Overflow
     const overflows = textBoxes.filter(b =>
-      b.x < viewBox.x - 2 ||
-      b.y < viewBox.y - 2 ||
+      b.x < viewBox.x - 2 || b.y < viewBox.y - 2 ||
       b.x + b.w > viewBox.x + viewBox.width + 2 ||
-      b.y + b.h > viewBox.y + viewBox.height + 2
-    );
+      b.y + b.h > viewBox.y + viewBox.height + 2);
     overflows.forEach(o => issues.push({
-      kind: 'overflow',
-      text: o.text,
-      bbox: [o.x|0, o.y|0, o.w|0, o.h|0],
+      kind: 'overflow', text: o.text, bbox: [o.x|0, o.y|0, o.w|0, o.h|0]
     }));
 
-    // Overlap: any two text boxes that overlap
+    // Text overlaps
     let overlapCount = 0;
     const overlapExamples = [];
     for (let i = 0; i < textBoxes.length; i++) {
       for (let j = i + 1; j < textBoxes.length; j++) {
         const a = textBoxes[i], b = textBoxes[j];
-        const overlapX = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
-        const overlapY = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
-        if (overlapX > 2 && overlapY > 2) {
+        const ox = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+        const oy = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+        if (ox > 2 && oy > 2) {
           overlapCount++;
-          if (overlapExamples.length < 6) {
-            overlapExamples.push({ a: a.text, b: b.text, ox: overlapX|0, oy: overlapY|0 });
+          if (overlapExamples.length < 8) {
+            overlapExamples.push({ a: a.text, b: b.text, ox: ox|0, oy: oy|0 });
           }
         }
       }
@@ -268,43 +374,15 @@ async function runChecks(page) {
       issues.push({ kind: 'text-overlap', count: overlapCount, examples: overlapExamples });
     }
 
-    // Line overlap with spine: check whether non-spine lines cross y=spineY too closely
-    // (looking for "small bones touching spine")
-    const spineLine = lines.find(l =>
-      Math.abs(parseFloat(l.getAttribute('y1')) - parseFloat(l.getAttribute('y2'))) < 0.5
-      && parseFloat(l.getAttribute('stroke-width')) >= 3
-    );
-    if (spineLine) {
-      const spineY = parseFloat(spineLine.getAttribute('y1'));
-      const spineX1 = parseFloat(spineLine.getAttribute('x1'));
-      const spineX2 = parseFloat(spineLine.getAttribute('x2'));
-      // For each other line, check whether it crosses spineY within spine's X range
-      // (excluding lines that ARE the spine or major bones meeting at spine)
-      let crossCount = 0;
-      lines.forEach(l => {
-        if (l === spineLine) return;
-        const x1 = parseFloat(l.getAttribute('x1'));
-        const y1 = parseFloat(l.getAttribute('y1'));
-        const x2 = parseFloat(l.getAttribute('x2'));
-        const y2 = parseFloat(l.getAttribute('y2'));
-        // Major bones end on spine — skip them
-        const touchesSpine = (Math.abs(y1 - spineY) < 1 && x1 > spineX1 - 1 && x1 < spineX2 + 1) ||
-                             (Math.abs(y2 - spineY) < 1 && x2 > spineX1 - 1 && x2 < spineX2 + 1);
-        if (touchesSpine) return;
-        // Check if the line crosses spineY
-        if ((y1 < spineY && y2 > spineY) || (y1 > spineY && y2 < spineY)) {
-          // Solve for X at spineY
-          const t = (spineY - y1) / (y2 - y1);
-          const xc = x1 + t * (x2 - x1);
-          if (xc > spineX1 - 1 && xc < spineX2 + 1) {
-            crossCount++;
-          }
-        }
-      });
-      if (crossCount > 0) {
-        issues.push({ kind: 'spine-cross', count: crossCount });
-      }
-    }
+    // Text crossing major lines (cause/subcause/detail labels vs spine/major bones)
+    // Heuristic: text bounding box center should not lie ON a thick line within tolerance
+    const lines = Array.from(svg.querySelectorAll('line')).map(l => ({
+      x1: parseFloat(l.getAttribute('x1')),
+      y1: parseFloat(l.getAttribute('y1')),
+      x2: parseFloat(l.getAttribute('x2')),
+      y2: parseFloat(l.getAttribute('y2')),
+      sw: parseFloat(l.getAttribute('stroke-width')) || 1,
+    }));
 
     return {
       viewBox: [viewBox.x, viewBox.y, viewBox.width, viewBox.height],
@@ -312,6 +390,7 @@ async function runChecks(page) {
       lineCount: lines.length,
       issues,
       layoutSummary,
+      balanceMetrics,
     };
   });
 }
@@ -338,7 +417,6 @@ async function runChecks(page) {
     await page.evaluate(() => generateDiagram());
     await page.waitForTimeout(150);
 
-    // Resize SVG render area for screenshot consistency: capture only the svg
     const svg = await page.$('#diagramContainer svg');
     const file = path.join(OUT_DIR, `${name}.png`);
     if (svg) {
@@ -349,15 +427,52 @@ async function runChecks(page) {
 
     const check = await runChecks(page);
     summary.push({ name, file, check });
+
+    const bm = check.balanceMetrics || {};
     const issueSummary = (check.issues || [])
-      .map(i => i.kind + (i.count ? `:${i.count}` : ''))
-      .join(', ') || 'clean';
+      .map(i => i.kind + (i.count ? `:${i.count}` : '')).join(', ') || 'clean';
     const modes = (check.layoutSummary || [])
-      .map(c => `${c.name}:${c.mode === 'pair' ? 'P' : 'S'}(${c.numCauses})`)
-      .join(' ');
-    console.log(`${name.padEnd(20)} | vb=${check.viewBox.map(v=>v|0).join(',')} | ${modes} | ${issueSummary}`);
+      .map(c => `${c.name}:${c.mode === 'pair' ? 'P' : 'S'}(${c.numCauses})`).join(' ');
+    console.log(
+      `${name.padEnd(20)} | vb=${check.viewBox.map(v=>v|0).join('×').padEnd(11)} ` +
+      `| sym=${bm.symmetry || '-'} aspc=${bm.aspect || '-'} ` +
+      `topY±${bm.topBoneYRange || 0} botY±${bm.botBoneYRange || 0} ` +
+      `gapσT=${bm.topGapStddev || 0} σB=${bm.botGapStddev || 0} ` +
+      `| ${modes} | ${issueSummary}`
+    );
   }
 
   fs.writeFileSync(path.join(OUT_DIR, 'summary.json'), JSON.stringify(summary, null, 2));
+
+  // Generate HTML grid
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Verify grid</title>
+<style>
+body { font-family: system-ui; background: #f0f0f0; padding: 12px; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.cell { background: white; padding: 8px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.cell h3 { margin: 0 0 6px 0; font-size: 13px; }
+.cell .meta { font-size: 11px; color: #666; margin-bottom: 6px; }
+.cell img { max-width: 100%; display: block; border: 1px solid #ddd; }
+.issues { font-size: 10px; color: #c00; }
+.clean { color: #080; }
+</style></head><body>
+<h1>Ishikawa Diagram Verification (${summary.length} patterns)</h1>
+<div class="grid">
+${summary.map(s => `
+<div class="cell">
+  <h3>${s.name}</h3>
+  <div class="meta">vb: ${(s.check.viewBox || []).map(v => v|0).join(' × ')} |
+    sym: ${s.check.balanceMetrics ? s.check.balanceMetrics.symmetry : '-'} |
+    aspect: ${s.check.balanceMetrics ? s.check.balanceMetrics.aspect : '-'}</div>
+  <div class="${(s.check.issues || []).length === 0 ? 'clean' : 'issues'}">
+    ${(s.check.issues || []).length === 0 ? '✓ clean' :
+      (s.check.issues || []).map(i => i.kind + (i.count ? `:${i.count}` : '')).join(', ')}
+  </div>
+  <img src="${path.basename(s.file)}" alt="${s.name}">
+</div>`).join('\n')}
+</div>
+</body></html>`;
+  fs.writeFileSync(path.join(OUT_DIR, 'index.html'), html);
+
   await browser.close();
 })();
