@@ -499,23 +499,40 @@ async function runChecks(page) {
       }
     } catch (_) { /* ignore */ }
 
-    // Text bounding boxes
+    // Major bone / spine line detection: identify thick lines so we can check
+    // whether labels accidentally cross them
+    const allLines = Array.from(svg.querySelectorAll('line')).map(l => ({
+      x1: parseFloat(l.getAttribute('x1')),
+      y1: parseFloat(l.getAttribute('y1')),
+      x2: parseFloat(l.getAttribute('x2')),
+      y2: parseFloat(l.getAttribute('y2')),
+      sw: parseFloat(l.getAttribute('stroke-width')) || 1,
+    }));
+
+    // Text bounding boxes (capture parent type so we can exclude category boxes
+    // from the bone-crossing check: category labels sit inside boxes at the bone tip
+    // and a thick category-box rect masks the bone underneath)
     const texts = Array.from(svg.querySelectorAll('text'));
     const textBoxes = texts.map(t => {
       const bb = t.getBBox();
       let dx = 0, dy = 0;
       let parent = t.parentElement;
+      let parentType = null;
       while (parent && parent !== svg) {
         const tr = parent.getAttribute && parent.getAttribute('transform');
         if (tr) {
           const m = tr.match(/translate\(([-\d.]+),?\s*([-\d.]+)?\)/);
           if (m) { dx += parseFloat(m[1] || 0); dy += parseFloat(m[2] || 0); }
         }
+        if (parent.getAttribute && parent.getAttribute('data-type')) {
+          parentType = parent.getAttribute('data-type');
+        }
         parent = parent.parentElement;
       }
       return {
         text: t.textContent.slice(0, 24),
         x: bb.x + dx, y: bb.y + dy, w: bb.width, h: bb.height,
+        parentType,
       };
     }).filter(b => b.w > 0 && b.h > 0);
 
@@ -546,6 +563,56 @@ async function runChecks(page) {
     }
     if (overlapCount > 0) {
       issues.push({ kind: 'text-overlap', count: overlapCount, examples: overlapExamples });
+    }
+
+    // Label vs heavy lines (spine, major bone): text bbox crosses a thick line.
+    // Skip thin lines (stroke <= 1.5) since detail/sub lines naturally pass near labels.
+    const heavyLines = allLines.filter(l => l.sw >= 2.5);
+    const segmentCrossesBbox = (line, b) => {
+      // Check if the line segment intersects rectangle (b.x, b.y, b.x+b.w, b.y+b.h)
+      // Use Cohen-Sutherland-like approach: parameterize and find intersection.
+      const x0 = line.x1, y0 = line.y1, x1 = line.x2, y1 = line.y2;
+      const dx = x1 - x0, dy = y1 - y0;
+      const r = { l: b.x, t: b.y, r: b.x + b.w, b: b.y + b.h };
+      let t0 = 0, t1 = 1;
+      const clip = (p, q) => {
+        if (Math.abs(p) < 1e-9) return q >= 0;
+        const r = q / p;
+        if (p < 0) {
+          if (r > t1) return false;
+          if (r > t0) t0 = r;
+        } else {
+          if (r < t0) return false;
+          if (r < t1) t1 = r;
+        }
+        return true;
+      };
+      if (!clip(-dx, x0 - r.l)) return false;
+      if (!clip(dx, r.r - x0)) return false;
+      if (!clip(-dy, y0 - r.t)) return false;
+      if (!clip(dy, r.b - y0)) return false;
+      return t0 < t1;
+    };
+    let labelCrossLines = 0;
+    const labelCrossExamples = [];
+    for (const tb of textBoxes) {
+      // Skip 'category' and 'effect' labels: they sit inside boxes that mask the bone.
+      if (tb.parentType === 'category' || tb.parentType === 'effect') continue;
+      // shrink bbox slightly so we don't trigger on the line that legitimately attaches to this label
+      const bb = { x: tb.x + 1, y: tb.y + 1, w: tb.w - 2, h: tb.h - 2 };
+      if (bb.w <= 0 || bb.h <= 0) continue;
+      for (const l of heavyLines) {
+        if (segmentCrossesBbox(l, bb)) {
+          labelCrossLines++;
+          if (labelCrossExamples.length < 6) {
+            labelCrossExamples.push({ text: tb.text, line: [l.x1|0,l.y1|0,l.x2|0,l.y2|0], sw: l.sw });
+          }
+          break;
+        }
+      }
+    }
+    if (labelCrossLines > 0) {
+      issues.push({ kind: 'label-cross-heavy-line', count: labelCrossLines, examples: labelCrossExamples });
     }
 
     // Text crossing major lines (cause/subcause/detail labels vs spine/major bones)

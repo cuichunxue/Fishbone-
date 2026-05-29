@@ -739,26 +739,26 @@ class IshikawaDiagram {
 
   /**
    * 孫骨は小骨ライン上に分岐する。
-   * ルール: 小骨は斜め骨 ⇒ 孫骨は左右交互に展開する
-   *   - 偶数番目 (i=0,2,...): 小骨の進行方向と同じ向き (外側)
-   *   - 奇数番目 (i=1,3,...): 反対向き (内側)
-   * これにより、隣接する孫骨ラベルがX方向に離れて重なり回避になる。
+   *
+   * 当初は「斜め骨 ⇒ 孫骨は左右交互」ルールを適用したが、
+   * INNER 孫骨が親小骨の傾きと大骨方向の関係で大骨ラインに干渉する
+   * ケースが発生したため、孫骨は親小骨方向に統一して伸ばす方式に変更。
+   *
+   * 親小骨が斜めのため、孫骨の attach Y は t に応じて自然に
+   * 縦方向にずれる。これにより孫骨ラベル同士は重ならない。
+   * (左右交互の見栄えは、親小骨の傾きで実現される)
    */
   computeDetailGeometry(sub, ctx) {
     const p = this.params;
     if (!sub.details.length) return [];
 
     const ts = this.computeEvenT(sub.details.length, p.detailTMin, p.detailTMax);
-    const parentDir = ctx.horizontalDir; // 小骨が向いている水平方向
+    const horizontalDir = ctx.horizontalDir; // 親小骨と同じ向きで外側へ
 
     return sub.details.map((detail, i) => {
       const t = ts[i];
       const attachX = ctx.attachX + (ctx.endX - ctx.attachX) * t;
       const attachY = ctx.attachY + (ctx.endY - ctx.attachY) * t;
-
-      // 左右交互 (偶数=外側=parentDir, 奇数=内側=-parentDir)
-      const isOuterDetail = (i % 2 === 0);
-      const horizontalDir = isOuterDetail ? parentDir : -parentDir;
 
       const startX = attachX + horizontalDir * p.detailLength;
       const startY = attachY;
@@ -769,7 +769,6 @@ class IshikawaDiagram {
         startX, startY,
         verticalDir: ctx.verticalDir,
         horizontalDir,
-        isOuterDetail,
       };
     });
   }
