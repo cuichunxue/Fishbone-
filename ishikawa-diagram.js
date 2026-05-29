@@ -1026,15 +1026,16 @@ class IshikawaDiagram {
     this.mainGroup.appendChild(arrow);
 
     // 小骨ラベル: 小骨の free end の少し外側
+    // 小骨は上下交互 (verticalDir で UP/DOWN) のため、
+    // ラベルの dy は subcause の verticalDir に従う (UP 小骨なら上、DOWN 小骨なら下)
     const labelGroup = this.createGroup();
     const offsetAlong = 8;
     const cosS60 = Math.cos((p.subcauseAngleDeg * Math.PI) / 180);
     const sinS60 = Math.sin((p.subcauseAngleDeg * Math.PI) / 180);
     const verticalDir = subInfo.verticalDir;
-    // 小骨の方向に沿って外側へ
     const labelAnchorX = subInfo.endX + horizontalDir * offsetAlong * cosS60;
     const labelAnchorY = subInfo.endY + verticalDir * offsetAlong * sinS60;
-    const labelDy = catInfo.isTop ? -6 : 6;
+    const labelDy = verticalDir * 6;  // 小骨方向に追従 (上下交互配置対応)
     const anchor = isLeft ? 'end' : 'start';
     const labelText = this.createText(
       labelAnchorX,
@@ -1074,9 +1075,10 @@ class IshikawaDiagram {
     );
     this.mainGroup.appendChild(arrow);
 
-    // ラベル
+    // ラベル: 親小骨の verticalDir に従って上下決定 (上下交互配置対応)
     const labelGroup = this.createGroup();
-    const labelDy = catInfo.isTop ? -5 : 13;
+    const subVDir = detailInfo.verticalDir || (catInfo.isTop ? -1 : 1);
+    const labelDy = subVDir * 7;  // 親小骨方向に追従
     const labelX = detailInfo.startX + (isLeft ? -2 : 2);
     const anchor = isLeft ? 'end' : 'start';
     const labelText = this.createText(
