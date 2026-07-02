@@ -581,6 +581,25 @@ const DATASETS = {
     cause "f"
       subcause "g"
     cause "h"`,
+
+  '29-very-long-labels': `ishikawa
+  effect "重要顧客からの継続契約更新率が低下"
+  category "営業プロセス"
+    cause "更新時期の前倒しアプローチができていない"
+      subcause "契約管理システムのリマインダーが未設定"
+        detail "設定手順が周知されていない"
+      subcause "担当者間の引き継ぎ漏れが頻発している"
+    cause "顧客の利用状況データを提案に活かせていない"
+      subcause "ダッシュボードの見方の教育不足"
+  category "カスタマーサクセス"
+    cause "オンボーディング完了後のフォロー体制が薄い"
+      subcause "定期ヘルスチェックが仕組み化されていない"
+        detail "チェックリストが存在しない"
+    cause "解約予兆スコアリングの精度が低い"
+  category "プロダクト"
+    cause "競合と比較した際の機能優位性の訴求が弱い"
+    cause "利用開始初期のつまずきポイントが放置されている"
+      subcause "チュートリアルの完了率が低い"`,
 };
 
 async function runChecks(page) {

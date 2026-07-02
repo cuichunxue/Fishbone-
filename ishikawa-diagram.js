@@ -132,6 +132,14 @@ class IshikawaDiagram {
       causeLabelGap: 18,
       subcauseLabelGap: 12,
       detailLabelGap: 6,
+
+      // ラベル折返し: この幅 (px) を超えるラベルは 2 行にバランス分割
+      // 長文ラベルでキャンバスが横に間延びするのを防ぎ、読みやすくする
+      labelWrapWidth: {
+        cause: 170,     // 約 12 全角文字
+        subcause: 132,  // 約 11 全角文字
+        detail: 100,    // 約 9 全角文字
+      },
     };
   }
 
@@ -224,12 +232,21 @@ class IshikawaDiagram {
 
       const tSubRange = p.subcauseTMax - p.subcauseTMin;
       const causeMetrics = cat.causes.map(cause => {
-        const causeLabelW = this.estimateTextWidth(cause.name, p.fontPx.cause) + 20;
+        // ラベルは labelWrapWidth を超えると 2 行に折り返される前提で幅を推定
+        const causeLabelM = this.wrappedLabelMetrics(
+          cause.name, p.fontPx.cause, p.labelWrapWidth.cause);
+        const causeLabelW = causeLabelM.width + 20;
+        const causeLabelLines = causeLabelM.lineCount;
         const numSub = cause.subcauses.length;
 
+        const subLabelMs = cause.subcauses.map(s =>
+          this.wrappedLabelMetrics(s.name, p.fontPx.subcause, p.labelWrapWidth.subcause));
         const maxSubLabel = numSub > 0
-          ? Math.max(...cause.subcauses.map(s => this.estimateTextWidth(s.name, p.fontPx.subcause)))
+          ? Math.max(...subLabelMs.map(m => m.width))
           : 0;
+        const maxSubLabelLines = numSub > 0
+          ? Math.max(...subLabelMs.map(m => m.lineCount))
+          : 1;
 
         // 小骨は上下交互配置なので同じ側 (UP/DOWN それぞれ) の隣接小骨は
         // index 差 2 で並ぶ。よって X 間隔は 2*tStep として算出する。
@@ -258,14 +275,15 @@ class IshikawaDiagram {
           : p.subcauseLength;
         const hasDetails = cause.subcauses.some(s => s.details.length > 0);
 
-        const maxDetailLabel = cause.subcauses.flatMap(s => s.details).length > 0
-          ? Math.max(0, ...cause.subcauses.flatMap(s =>
-              s.details.map(d => this.estimateTextWidth(d, p.fontPx.detail))
-            ))
+        const detailLabelMs = cause.subcauses.flatMap(s =>
+          s.details.map(d =>
+            this.wrappedLabelMetrics(d, p.fontPx.detail, p.labelWrapWidth.detail)));
+        const maxDetailLabel = detailLabelMs.length > 0
+          ? Math.max(0, ...detailLabelMs.map(m => m.width))
           : 0;
 
         return {
-          causeLabelW, subSpread, maxSubLabel,
+          causeLabelW, causeLabelLines, subSpread, maxSubLabel, maxSubLabelLines,
           hasDetails, subLen, maxDetailLabel, numSub,
         };
       });
@@ -281,10 +299,17 @@ class IshikawaDiagram {
       const subLenLong = Math.max(p.subcauseLength, ...causeMetrics.map(m => m.subLen));
       const maxSubLabelGlobal = Math.max(0, ...causeMetrics.map(m => m.maxSubLabel));
       const maxDetailLabelGlobal = Math.max(0, ...causeMetrics.map(m => m.maxDetailLabel));
+      const maxCauseLabelW = Math.max(0, ...causeMetrics.map(m => m.causeLabelW));
+      const maxCauseLabelLines = Math.max(1, ...causeMetrics.map(m => m.causeLabelLines));
+      const maxSubLabelLines = Math.max(1, ...causeMetrics.map(m => m.maxSubLabelLines || 1));
+
+      // 折返しによる追加行の高さ
+      const causeLabelExtraH = (maxCauseLabelLines - 1) * (p.fontPx.cause + 3);
+      const subLabelExtraH = (maxSubLabelLines - 1) * (p.fontPx.subcause + 3);
 
       // 小骨の垂直占有 (小骨が無いカテゴリは 0)
       const subVertical = hasAnySubcauses
-        ? subLenLong * sinS + p.subcauseLabelGap + 18
+        ? subLenLong * sinS + p.subcauseLabelGap + 18 + subLabelExtraH
         : 0;
 
       // 水平方向の張り出し (実データに応じて)
@@ -293,23 +318,40 @@ class IshikawaDiagram {
         ? p.detailLength + maxDetailLabelGlobal + 16
         : 0;
 
+      // 中骨の attach 点から先 (free end 方向) の最大水平張り出し:
+      //   経路 1: 中骨本体 + 先端の中骨ラベル
+      //   経路 2: 小骨 attach (t=subcauseTMax) + 小骨水平投影 + 孫骨連鎖
+      // 従来は「中骨本体 + 小骨連鎖」で計算しており、
+      //   - ラベルの張り出しが漏れる (長文で不足)
+      //   - 小骨連鎖を骨の先端起点として過大評価
+      // の両方を修正
+      const beyondAttachHorizontal = Math.max(
+        causeLength + maxCauseLabelW + 12,
+        causeLength * p.subcauseTMax + subHorizontalOuter + detailHorizontalOuter,
+      );
+
       // === 大骨長を 2 通り計算して、両側 / 片側を選択 ===
       // 新ルール: 小骨は上下交互に展開するため、
       //   隣接中骨間で「DOWN 小骨 + UP 小骨」が衝突しないよう
       //   縦方向の中骨間隔が 2 × 小骨垂直展開 以上必要
+      // 折返しでラベルが 2 行になる場合はその分も加算
       const verticalNeedBetweenCauses = hasAnySubcauses
-        ? (2 * subLenLong * sinS + 50)  // 上下両方向の小骨 + ラベル分
-        : 60;
+        ? (2 * subLenLong * sinS + 50 + 2 * subLabelExtraH + causeLabelExtraH)
+        : 60 + causeLabelExtraH;
 
-      // 両側配置: ペア間隔 (縦) + 内側中骨が背骨に達しない条件
+      // 両側配置: ペア間隔 (縦) + 内側中骨が最低限の長さを確保できる条件
       const pairTRange = p.pairTMax - p.pairTMin;
       const requiredMajorByVerticalBoth = numPairs <= 1
         ? 0
         : verticalNeedBetweenCauses * (numPairs - 1) / (sinA * pairTRange);
-      // 内側中骨は中骨本体+小骨水平+孫骨水平が背骨に届かないように
-      const innerHorizontalNeed =
-        causeLength + subHorizontalOuter + detailHorizontalOuter + p.innerSafeMargin;
-      const requiredMajorByInner = innerHorizontalNeed / (cosA * p.pairTMin);
+      // 内側中骨はフル長を要求しない (実行時に安全長へ自動キャップされる)。
+      // ただし骨が短すぎると不格好なため、最低 90px + 先端の張り出し
+      // (ラベル or 小骨連鎖の大きい方) が確保できる大骨長を要求する。
+      const innerTipExtras = Math.max(
+        subHorizontalOuter + detailHorizontalOuter,
+        maxCauseLabelW + 12,
+      ) + p.innerSafeMargin;
+      const requiredMajorByInner = (90 + innerTipExtras) / (cosA * p.pairTMin);
       const majorByBothSides = Math.max(
         500,
         requiredMajorByVerticalBoth,
@@ -350,8 +392,10 @@ class IshikawaDiagram {
         layoutMode: null,
         subHorizontalOuter,
         detailHorizontalOuter,
+        beyondAttachHorizontal,
         subVertical,
         maxDetailLabelGlobal,
+        maxCauseLabelW,
         hasAnySubcauses,
         hasAnyDetails,
       };
@@ -393,11 +437,9 @@ class IshikawaDiagram {
         boneTipVertical,
       );
       info.majorHorizontal = globalL * cosA;
+      // 中骨ラベル/小骨連鎖の張り出しは beyondAttachHorizontal に集約済み
       const farLeftFromSpine =
-        globalL * cosA * tMaxForExtents +
-        info.causeLength +
-        info.subHorizontalOuter +
-        info.detailHorizontalOuter;
+        globalL * cosA * tMaxForExtents + info.beyondAttachHorizontal;
       info.horizontalExtentFromSpine = Math.max(
         info.majorHorizontal + p.categoryBoxWidth * 0.55 + 24,
         farLeftFromSpine + 20,
@@ -650,10 +692,13 @@ class IshikawaDiagram {
         causeLen = info.causeLength;
       } else {
         direction = 1;
-        // 内側中骨の最大長: spineX に対し、中骨先端 + 小骨水平 + 孫骨水平 + 余白 が届く距離
+        // 内側中骨の最大長: 先端の中骨ラベル・小骨/孫骨連鎖のいずれも
+        // 背骨に届かない距離に制限する
         const distToSpine = info.spineX - attachX;
-        const innerExtras =
-          info.subHorizontalOuter + info.detailHorizontalOuter + p.innerSafeMargin;
+        const innerExtras = Math.max(
+          info.subHorizontalOuter + info.detailHorizontalOuter,
+          info.maxCauseLabelW + 12,
+        ) + p.innerSafeMargin;
         const maxInner = distToSpine - innerExtras;
         causeLen = Math.max(80, Math.min(info.causeLength, maxInner));
       }
@@ -857,6 +902,42 @@ class IshikawaDiagram {
     return w;
   }
 
+  /**
+   * 長いラベルを最大 2 行にバランス良く折り返す
+   * @returns {string[]} 1 行または 2 行の配列
+   */
+  wrapLabel(text, fontSize, maxWidth) {
+    if (!text) return [''];
+    const total = this.estimateTextWidth(text, fontSize);
+    if (total <= maxWidth) return [text];
+    // 2 行に均等分割: 累積幅が半分を超える位置で切る
+    const half = total / 2;
+    let acc = 0;
+    let splitIdx = 1;
+    const chars = Array.from(text);
+    for (let i = 0; i < chars.length; i++) {
+      const isAscii = chars[i].charCodeAt(0) < 128;
+      acc += fontSize * (isAscii ? 0.55 : 1.0);
+      if (acc >= half) {
+        splitIdx = Math.min(Math.max(1, i + 1), chars.length - 1);
+        break;
+      }
+    }
+    return [
+      chars.slice(0, splitIdx).join(''),
+      chars.slice(splitIdx).join(''),
+    ];
+  }
+
+  /**
+   * 折返し後のラベル幅 (最長行) を推定
+   */
+  wrappedLabelMetrics(text, fontSize, maxWidth) {
+    const lines = this.wrapLabel(text, fontSize, maxWidth);
+    const width = Math.max(...lines.map(l => this.estimateTextWidth(l, fontSize)));
+    return { lines, width, lineCount: lines.length };
+  }
+
   // ===== 描画 =====
 
   drawAll() {
@@ -1008,18 +1089,24 @@ class IshikawaDiagram {
     );
     this.mainGroup.appendChild(arrow);
 
-    // ラベル: 中骨の free end の少し外側
+    // ラベル: 中骨の free end の少し外側。長文は 2 行に折り返し、
+    // 骨のライン上に上下中央でブロック配置 (先端の先なので線と重ならない)
     const labelGroup = this.createGroup();
-    const labelDy = catInfo.isTop ? -p.causeLabelGap * 0.4 : p.causeLabelGap * 0.4;
     const labelX = causeInfo.startX + (isLeft ? -6 : 6);
     const anchor = isLeft ? 'end' : 'start';
-    const labelText = this.createText(
+    const lines = this.wrapLabel(
+      causeInfo.cause.name, p.fontPx.cause, p.labelWrapWidth.cause);
+    const labelDy = lines.length > 1
+      ? 0  // 複数行はブロックを線の中心に
+      : (catInfo.isTop ? -p.causeLabelGap * 0.4 : p.causeLabelGap * 0.4);
+    const labelText = this.createWrappedText(
       labelX,
       causeInfo.startY + labelDy,
-      causeInfo.cause.name,
+      lines,
       p.fontPx.cause, '700',
       this.style.textDark,
-      anchor
+      anchor,
+      0  // 中央揃え
     );
     labelGroup.appendChild(labelText);
     this.makeGroupDraggable(labelGroup, 'cause', causeInfo.cause);
@@ -1065,13 +1152,17 @@ class IshikawaDiagram {
     const labelAnchorY = subInfo.endY + verticalDir * offsetAlong * sinS60;
     const labelDy = verticalDir * 6;  // 小骨方向に追従 (上下交互配置対応)
     const anchor = isLeft ? 'end' : 'start';
-    const labelText = this.createText(
+    // 長文は 2 行に折り返し、小骨の伸びる方向 (外側) に積む
+    const lines = this.wrapLabel(
+      subInfo.sub.name, p.fontPx.subcause, p.labelWrapWidth.subcause);
+    const labelText = this.createWrappedText(
       labelAnchorX,
       labelAnchorY + labelDy,
-      subInfo.sub.name,
+      lines,
       p.fontPx.subcause, '600',
       this.style.textMid,
-      anchor
+      anchor,
+      verticalDir  // UP 小骨は上へ、DOWN 小骨は下へ積む
     );
     labelGroup.appendChild(labelText);
     this.makeGroupDraggable(labelGroup, 'subcause', subInfo.sub);
@@ -1104,18 +1195,22 @@ class IshikawaDiagram {
     this.mainGroup.appendChild(arrow);
 
     // ラベル: 親小骨の verticalDir に従って上下決定 (上下交互配置対応)
+    // 長文は 2 行に折り返し、親小骨の方向に積む
     const labelGroup = this.createGroup();
     const subVDir = detailInfo.verticalDir || (catInfo.isTop ? -1 : 1);
     const labelDy = subVDir * 7;  // 親小骨方向に追従
     const labelX = detailInfo.startX + (isLeft ? -2 : 2);
     const anchor = isLeft ? 'end' : 'start';
-    const labelText = this.createText(
+    const lines = this.wrapLabel(
+      detailInfo.detail, p.fontPx.detail, p.labelWrapWidth.detail);
+    const labelText = this.createWrappedText(
       labelX,
       detailInfo.startY + labelDy,
-      detailInfo.detail,
+      lines,
       p.fontPx.detail, 'normal',
       this.style.textMuted,
-      anchor
+      anchor,
+      subVDir
     );
     labelGroup.appendChild(labelText);
     this.makeGroupDraggable(labelGroup, 'detail', { name: detailInfo.detail });
@@ -1166,6 +1261,43 @@ class IshikawaDiagram {
     t.setAttribute('dominant-baseline', 'middle');
     t.setAttribute('font-family', 'system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif');
     t.textContent = text;
+    return t;
+  }
+
+  /**
+   * 折返し済みの複数行テキストを作成
+   * @param {string[]} lines - wrapLabel の結果
+   * @param {number} stackDir - 行の積み方向:
+   *   -1 = 上に積む (最終行がアンカー y)、+1 = 下に積む (先頭行がアンカー y)、
+   *    0 = ブロックを y 中心に配置
+   */
+  createWrappedText(x, y, lines, fontSize, fontWeight, fill, textAnchor, stackDir = 0) {
+    const lineH = fontSize + 3;
+    const n = lines.length;
+    let y0;
+    if (stackDir < 0) {
+      y0 = y - (n - 1) * lineH;      // 上へ積む
+    } else if (stackDir > 0) {
+      y0 = y;                         // 下へ積む
+    } else {
+      y0 = y - ((n - 1) * lineH) / 2; // 中央揃え
+    }
+    const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    t.setAttribute('x', x);
+    t.setAttribute('y', y0);
+    t.setAttribute('font-size', fontSize);
+    t.setAttribute('font-weight', fontWeight);
+    t.setAttribute('fill', fill);
+    t.setAttribute('text-anchor', textAnchor);
+    t.setAttribute('dominant-baseline', 'middle');
+    t.setAttribute('font-family', 'system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif');
+    lines.forEach((line, i) => {
+      const tspan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
+      tspan.setAttribute('x', x);
+      tspan.setAttribute('dy', i === 0 ? 0 : lineH);
+      tspan.textContent = line;
+      t.appendChild(tspan);
+    });
     return t;
   }
 
