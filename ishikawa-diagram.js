@@ -1,14 +1,24 @@
 /**
  * 石川ダイアグラム（特性要因図）描画・編集エンジン
  *
- * 設計方針:
- *  - データ駆動の自動レイアウト: 描画前にすべての座標を計算し、
- *    どのカテゴリ・原因数・小骨数でも重ならないキャンバスサイズと配置を決める。
- *  - 大骨は固定角度で背骨に対して上下に交互配置。
- *  - 中骨はすべて背骨と逆方向（外側）に水平に伸ばし、ジグザグを排除。
- *  - 小骨は中骨に対し外側へ斜めに延ばし、3本目以降は長さを交互に変えてラベルを縦にずらす。
- *  - 孫骨は小骨先端から外側へ水平に伸ばす。
- *  - キャンバス座標は計算済みなので、ビューボックスもそれに合わせて自動設定。
+ * 教科書ルール (実装済み):
+ *  - 背骨: 太い水平矢印。矢先は特性ボックスの左辺に接する。
+ *  - 大骨: 背骨に対し 60° で上下交互。矢先は背骨に刺さる。先端にカテゴリボックス。
+ *  - 中骨: 水平 (背骨と平行)。大骨の両側にペアで交互配置し、矢先は大骨へ。
+ *    ペアの左右は大骨上で少し段違いにして矢印の衝突を防ぐ (参考図と同じ)。
+ *  - 小骨: 大骨と平行 (同じ 60°)。中骨の上下に交互配置し、矢先は中骨へ。
+ *  - 孫骨: 水平 (中骨と平行)。小骨ライン上に分岐し、矢先は小骨へ。
+ *  - 線の太さは階層で単調減少 (背骨 5 > 大骨 3.5 > 中骨 2.2 > 小骨 1.5 > 孫骨 1)。
+ *
+ * 自動レイアウトのルール:
+ *  - 完全データ駆動: 描画前に全座標を計算し、どんなデータでも重ならない
+ *    キャンバスサイズと配置を決める (テキスト幅も推定して反映)。
+ *  - 親骨の長さは子骨のペア数 (ceil(N/2)) に応じて段階的に伸縮。
+ *  - 大骨長は全カテゴリで統一 → 大骨先端の Y がそろい、バランスが取れる。
+ *  - モード (両側ペア/片側) は図全体で統一。全カテゴリが両側配置の
+ *    閾値に収まる場合のみペア、それ以外は片側にフォールバック。
+ *  - 背骨は常にキャンバスの上下中央。最低アスペクト比 1.15 を保証。
+ *  - 内側 (背骨側) へ伸びる中骨・小骨は背骨に届かない長さに自動キャップ。
  */
 class IshikawaDiagram {
   constructor(containerId) {
@@ -67,8 +77,8 @@ class IshikawaDiagram {
     // 中骨は「ペア配置(両側)」を優先し、データ密度が高くて両側配置が
     // キャンバスを巨大化させる場合のみ片側(全て外側)にフォールバック。
     this.params = {
-      majorAngleDeg: 56,           // 大骨の傾き
-      subcauseAngleDeg: 50,        // 小骨の傾き
+      majorAngleDeg: 60,           // 大骨の傾き (教科書標準の 60°)
+      subcauseAngleDeg: 60,        // 小骨の傾き = 大骨と平行 (教科書ルール)
 
       // ペア配置 (両側) 用 t 範囲
       // pairTMin が高い ⇒ 内側中骨にゆとり、大骨長が短い
@@ -99,7 +109,8 @@ class IshikawaDiagram {
       categoryBoxWidth: 140,
       categoryBoxHeight: 48,
       categoryGap: 90,
-      effectGap: 70,
+      effectGap: 18,               // 背骨矢先は特性ボックスに接する (教科書ルール)
+      pairStaggerT: 0.045,         // 中骨ペアの左右を大骨上で少しずらす (矢印衝突回避)
       effectBoxMaxHeight: 360,
       spineEndPadding: 110,
       innerSafeMargin: 26,
@@ -346,27 +357,30 @@ class IshikawaDiagram {
       };
     });
 
-    // ---- カテゴリごとのモードと統一大骨長を決定 ----
-    // ルール:
-    //   1. 中骨 1 本のカテゴリ: 常に S (ペア不可)
-    //   2. 中骨 2 本以上で両側配置が閾値内: P
-    //   3. それ以外: S (フォールバック)
+    // ---- 図全体で統一するモードと大骨長を決定 ----
+    // ルール (図の統一感 = 教科書的な見た目のため、モードは図全体で 1 つ):
+    //   1. 中骨 2 本以上の全カテゴリが両側配置の閾値内 → 図全体を P (両側)
+    //   2. 1 つでも閾値を超える → 図全体を S (片側) にフォールバック
+    //   3. 中骨 1 本のカテゴリはペア不可なので常に S (見た目は単に中骨 1 本)
     // 統一 L = 全カテゴリの選択モードでの必要 L の最大値
     //   ⇒ 大骨先端 Y がカテゴリ間で揃い、視覚バランスが取れる
+    const multiCauseCats = categoryInfos.filter(c => c.numCauses >= 2);
+    const globalPair = multiCauseCats.length > 0 &&
+      multiCauseCats.every(c => c.majorByBothSides <= p.bothSidesMaxBoneLength);
     categoryInfos.forEach(c => {
-      c.layoutMode =
-        (c.numCauses >= 2 && c.majorByBothSides <= p.bothSidesMaxBoneLength)
-          ? 'pair' : 'single';
+      c.layoutMode = (globalPair && c.numCauses >= 2) ? 'pair' : 'single';
     });
     const globalL = Math.max(500, ...categoryInfos.map(c =>
       c.layoutMode === 'pair' ? c.majorByBothSides : c.majorBySingleSide
     ));
 
     // 各カテゴリに統一 L を適用し、派生量を計算
+    // ペア配置では右側 (内側) 中骨が pairTMax + pairStaggerT まで進むため、
+    // extents はスタガー分を含めて計算する
     categoryInfos.forEach(info => {
       info.majorBoneLength = globalL;
       const tMaxForExtents = (info.layoutMode === 'pair')
-        ? p.pairTMax : p.singleTMax;
+        ? p.pairTMax + p.pairStaggerT : p.singleTMax;
       info.farthestCauseY = globalL * sinA * tMaxForExtents;
       info.categoryVertical = info.farthestCauseY + info.subVertical + 24;
       info.majorHorizontal = globalL * cosA;
@@ -596,8 +610,12 @@ class IshikawaDiagram {
     if (info.layoutMode === 'pair') {
       const numPairs = info.numPairs;
       const pairTs = this.computeEvenT(numPairs, p.pairTMin, p.pairTMax);
+      // ペアの左右を大骨上で少しずらす: 同一点に 2 つの矢先が刺さると衝突するため
+      // (参考画像でも左右の中骨は少し段違いに描かれる)
+      // 内側 (right) を +δ にすると背骨からの距離が増え、内側キャップにも有利
       causePlacements = info.category.causes.map((_, i) => ({
-        t: pairTs[Math.floor(i / 2)],
+        t: pairTs[Math.floor(i / 2)]
+          + ((i % 2 === 0) ? -p.pairStaggerT : +p.pairStaggerT),
         side: (i % 2 === 0) ? 'left' : 'right',
       }));
     } else {
@@ -840,13 +858,15 @@ class IshikawaDiagram {
 
   drawSpine() {
     const L = this.layout;
+    // 背骨は特性ボックスの左辺まで延長し、矢先がボックスに接する (教科書ルール)
+    const tipX = L.effectX - 4;
     const spineLine = this.createLine(
-      L.spineStartX, L.spineY, L.spineEndX, L.spineY,
-      4, this.style.spine
+      L.spineStartX, L.spineY, tipX - 6, L.spineY,
+      5, this.style.spine
     );
     this.mainGroup.appendChild(spineLine);
 
-    const arrow = this.createArrowhead(L.spineEndX, L.spineY, 0, 16, this.style.spine);
+    const arrow = this.createArrowhead(tipX, L.spineY, 0, 18, this.style.spine);
     this.mainGroup.appendChild(arrow);
   }
 
@@ -922,7 +942,7 @@ class IshikawaDiagram {
     // 大骨
     const boneLine = this.createLine(
       info.spineX, info.spineY, info.boneEndX, info.boneEndY,
-      3.2, this.style.major
+      3.5, this.style.major
     );
     this.mainGroup.appendChild(boneLine);
 
@@ -1010,7 +1030,7 @@ class IshikawaDiagram {
     const line = this.createLine(
       subInfo.endX, subInfo.endY,
       subInfo.attachX, subInfo.attachY,
-      1.6, this.style.subcause
+      1.5, this.style.subcause
     );
     this.mainGroup.appendChild(line);
 
@@ -1062,7 +1082,7 @@ class IshikawaDiagram {
     const line = this.createLine(
       detailInfo.startX, detailInfo.startY,
       detailInfo.attachX, detailInfo.attachY,
-      1.1, this.style.detail
+      1.0, this.style.detail
     );
     this.mainGroup.appendChild(line);
 
