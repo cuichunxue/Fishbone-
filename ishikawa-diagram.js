@@ -59,19 +59,34 @@ class IshikawaDiagram {
     this.style = {
       spine: '#1f2d3d',
       major: '#2c3e50',
-      cause: '#5d6d7e',
-      subcause: '#85929e',
-      detail: '#aab7b8',
+      cause: '#4d5d6e',
+      subcause: '#75828f',
+      detail: '#93a0aa',
       effectFill: '#c0392b',
       effectStroke: '#922b21',
       categoryFill: '#2980b9',
       categoryStroke: '#1f618d',
       textDark: '#1b2631',
-      textMid: '#34495e',
+      textMid: '#2e4053',
       textLight: '#ffffff',
-      textMuted: '#566573',
+      textMuted: '#4d5a66',
       bg: '#ffffff',
     };
+
+    // カテゴリ色パレット (模範的な現代フィッシュボーンの色分けスタイル)
+    // 大骨とカテゴリボックスを系統ごとに色分けし、視覚グルーピングを強化。
+    // 中骨以下はグレー階調のままにして階層構造を保つ。
+    // 落ち着いたトーンで彩度を揃え、色覚多様性にも配慮した並び。
+    this.categoryPalette = [
+      { fill: '#2f6fb3', stroke: '#245a92' }, // 青
+      { fill: '#2e8b6e', stroke: '#247258' }, // 緑
+      { fill: '#b3762f', stroke: '#946025' }, // 琥珀
+      { fill: '#8e5aa8', stroke: '#75488c' }, // 紫
+      { fill: '#3a8fa3', stroke: '#2e7686' }, // 青緑
+      { fill: '#6a7b8c', stroke: '#556575' }, // スレート
+      { fill: '#a3663a', stroke: '#87542f' }, // 褐色
+      { fill: '#5d8a4a', stroke: '#4b713c' }, // 深緑
+    ];
 
     // 主要パラメータ（必要に応じてレイアウト計算で上書き）
     // 中骨は「ペア配置(両側)」を優先し、データ密度が高くて両側配置が
@@ -866,35 +881,50 @@ class IshikawaDiagram {
 
   /**
    * 効果ボックスのレイアウトを決定
-   *   - 短い文字列は横長ボックス
-   *   - 長い場合は縦書きで複数列に折り返し
+   * 模範図 (QC 教科書の実例) にならい横書き複数行で折り返す。
+   * 縦書き複数列は画面上の可読性が低いため廃止。
    */
   computeEffectBoxLayout(text) {
     const p = this.params;
     const fontSize = p.fontPx.effect;
-    const charsPerColumn = 10; // 1列の最大文字数
-    const len = (text || '').length;
+    const t = text || '';
 
-    if (len === 0) {
-      return { width: 140, height: 90, mode: 'horizontal', text: '' };
-    }
-    if (len <= 6) {
-      // 横長ボックス: 1行
-      const width = Math.max(140, len * (fontSize + 6) + 36);
-      const height = fontSize + 36;
-      return { width, height, mode: 'horizontal', text };
+    if (!t) {
+      return { width: 150, height: 76, lines: [''] };
     }
 
-    // 縦書き
-    const cols = Math.ceil(len / charsPerColumn);
-    const charsCol = Math.min(charsPerColumn, len);
-    const columnWidth = fontSize + 8;
-    const width = Math.max(80, cols * columnWidth + 20);
-    const height = Math.min(
-      p.effectBoxMaxHeight,
-      charsCol * (fontSize + 6) + 32
-    );
-    return { width, height, mode: 'vertical', text, cols, charsPerColumn };
+    // 1 行あたり約 9 全角文字で貪欲に折返し
+    const maxLineW = fontSize * 9;
+    const lines = this.wrapLabelMulti(t, fontSize, maxLineW);
+    const maxW = Math.max(...lines.map(l => this.estimateTextWidth(l, fontSize)));
+    const lineH = fontSize + 8;
+    return {
+      width: Math.max(150, maxW + 44),
+      height: lines.length * lineH + 28,
+      lines,
+    };
+  }
+
+  /**
+   * 貪欲法でテキストを複数行に折り返す (行数無制限)
+   */
+  wrapLabelMulti(text, fontSize, maxWidth) {
+    const lines = [];
+    let current = '';
+    let currentW = 0;
+    for (const ch of text) {
+      const chW = fontSize * (ch.charCodeAt(0) < 128 ? 0.55 : 1.0);
+      if (currentW + chW > maxWidth && current) {
+        lines.push(current);
+        current = ch;
+        currentW = chW;
+      } else {
+        current += ch;
+        currentW += chW;
+      }
+    }
+    if (current) lines.push(current);
+    return lines.length ? lines : [''];
   }
 
   /**
@@ -994,47 +1024,29 @@ class IshikawaDiagram {
     rect.setAttribute('filter', 'url(#boxShadow)');
     group.appendChild(rect);
 
-    if (eff.mode === 'horizontal') {
-      const t = this.createText(
-        x + eff.width / 2,
-        L.effectY,
-        eff.text,
-        p.fontPx.effect,
-        'bold',
-        this.style.textLight,
-        'middle'
-      );
-      group.appendChild(t);
-    } else {
-      // 縦書き: 1 文字ずつ tspan
-      const cols = eff.cols;
-      const charsPerCol = eff.charsPerColumn;
-      const colSpacing = (eff.width - 24) / cols;
-      const fontSize = p.fontPx.effect;
-      const lineH = fontSize + 6;
-      const text = eff.text;
-
-      for (let c = 0; c < cols; c++) {
-        const colChars = text.slice(c * charsPerCol, (c + 1) * charsPerCol);
-        const colX = x + 12 + colSpacing * (c + 0.5);
-        const textEl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        textEl.setAttribute('x', colX);
-        textEl.setAttribute('y', y + 18);
-        textEl.setAttribute('font-size', fontSize);
-        textEl.setAttribute('font-weight', 'bold');
-        textEl.setAttribute('fill', this.style.textLight);
-        textEl.setAttribute('text-anchor', 'middle');
-        // 開始 dy はそのまま、以降は lineH
-        colChars.split('').forEach((ch, i) => {
-          const tspan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
-          tspan.setAttribute('x', colX);
-          tspan.setAttribute('dy', i === 0 ? 0 : lineH);
-          tspan.textContent = ch;
-          textEl.appendChild(tspan);
-        });
-        group.appendChild(textEl);
-      }
-    }
+    // 横書き複数行 (模範図スタイル)。ボックス中央に行ブロックを配置
+    const fontSize = p.fontPx.effect;
+    const lineH = fontSize + 8;
+    const lines = eff.lines || [''];
+    const cx = x + eff.width / 2;
+    const blockTop = L.effectY - ((lines.length - 1) * lineH) / 2;
+    const textEl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    textEl.setAttribute('x', cx);
+    textEl.setAttribute('y', blockTop);
+    textEl.setAttribute('font-size', fontSize);
+    textEl.setAttribute('font-weight', 'bold');
+    textEl.setAttribute('fill', this.style.textLight);
+    textEl.setAttribute('text-anchor', 'middle');
+    textEl.setAttribute('dominant-baseline', 'middle');
+    textEl.setAttribute('font-family', 'system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif');
+    lines.forEach((line, i) => {
+      const tspan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
+      tspan.setAttribute('x', cx);
+      tspan.setAttribute('dy', i === 0 ? 0 : lineH);
+      tspan.textContent = line;
+      textEl.appendChild(tspan);
+    });
+    group.appendChild(textEl);
 
     this.makeGroupDraggable(group, 'effect');
     this.mainGroup.appendChild(group);
@@ -1047,20 +1059,22 @@ class IshikawaDiagram {
 
   drawCategory(info) {
     const p = this.params;
+    // カテゴリごとの色 (パレットを循環)
+    const color = this.categoryPalette[info.idx % this.categoryPalette.length];
 
-    // 大骨
+    // 大骨 (カテゴリ色で系統をグルーピング)
     const boneLine = this.createLine(
       info.spineX, info.spineY, info.boneEndX, info.boneEndY,
-      3.5, this.style.major
+      3.5, color.fill
     );
     this.mainGroup.appendChild(boneLine);
 
     // 矢印（背骨上に向かう）
     const arrowAngle = Math.atan2(info.spineY - info.boneEndY, info.spineX - info.boneEndX) * 180 / Math.PI;
-    const arrow = this.createArrowhead(info.spineX, info.spineY, arrowAngle, 10, this.style.major);
+    const arrow = this.createArrowhead(info.spineX, info.spineY, arrowAngle, 10, color.fill);
     this.mainGroup.appendChild(arrow);
 
-    // カテゴリボックス（大骨先端中心）
+    // カテゴリボックス（大骨先端中心、カテゴリ色）
     const group = this.createGroup();
     const bw = p.categoryBoxWidth;
     const bh = p.categoryBoxHeight;
@@ -1068,7 +1082,7 @@ class IshikawaDiagram {
     const by = info.boxCenter.y - bh / 2;
     const rect = this.createRect(
       bx, by, bw, bh,
-      this.style.categoryFill, this.style.categoryStroke, 2, 6
+      color.fill, color.stroke, 2, 6
     );
     rect.setAttribute('filter', 'url(#boxShadow)');
     group.appendChild(rect);
