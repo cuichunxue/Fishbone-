@@ -96,10 +96,11 @@ class IshikawaDiagram {
       subcauseAngleDeg: 60,        // 小骨の傾き = 大骨と平行 (教科書ルール)
 
       // ペア配置 (両側) 用 t 範囲
-      // pairTMin が高い ⇒ 内側中骨にゆとり、大骨長が短い
-      // pairTMax が低い ⇒ 縦キャンバスが短い
-      pairTMin: 0.48,
-      pairTMax: 0.88,
+      // 模範図では中骨が大骨の全長に分散するため範囲を広げる。
+      // 内側 (右) 中骨は +stagger で背骨から離れた位置に付くので、
+      // 低い t でも横方向の余地を確保できる。
+      pairTMin: 0.36,
+      pairTMax: 0.86,
       // 片側配置 (フォールバック) 用 t 範囲
       singleTMin: 0.18,
       singleTMax: 0.84,
@@ -125,7 +126,7 @@ class IshikawaDiagram {
       categoryBoxHeight: 48,
       categoryGap: 90,
       effectGap: 18,               // 背骨矢先は特性ボックスに接する (教科書ルール)
-      pairStaggerT: 0.045,         // 中骨ペアの左右を大骨上で少しずらす (矢印衝突回避)
+      pairStaggerT: 0.08,          // ペアの左右段差: 右(内側)を先端寄りに (模範図の描き方 + 内側の横余地確保)
       effectBoxMaxHeight: 360,
       spineEndPadding: 110,
       innerSafeMargin: 26,
@@ -135,12 +136,13 @@ class IshikawaDiagram {
       minCanvasHeight: 520,
       minCanvasWidth: 900,
 
+      // 相対可読性: 専用ソフト並みにキャンバスに対して文字を大きく
       fontPx: {
-        effect: 22,
-        category: 17,
-        cause: 14,
-        subcause: 12,
-        detail: 11,
+        effect: 24,
+        category: 18,
+        cause: 15,
+        subcause: 13,
+        detail: 12,
       },
       sideMarginX: 70,
       verticalMargin: 56,
@@ -151,9 +153,9 @@ class IshikawaDiagram {
       // ラベル折返し: この幅 (px) を超えるラベルは 2 行にバランス分割
       // 長文ラベルでキャンバスが横に間延びするのを防ぎ、読みやすくする
       labelWrapWidth: {
-        cause: 170,     // 約 12 全角文字
-        subcause: 132,  // 約 11 全角文字
-        detail: 100,    // 約 9 全角文字
+        cause: 180,     // 約 12 全角文字
+        subcause: 143,  // 約 11 全角文字
+        detail: 108,    // 約 9 全角文字
       },
     };
   }
@@ -292,13 +294,16 @@ class IshikawaDiagram {
 
         const detailLabelMs = cause.subcauses.flatMap(s =>
           s.details.map(d =>
-            this.wrappedLabelMetrics(d, p.fontPx.detail, p.labelWrapWidth.detail)));
+            this.wrappedLabelMetrics(
+              typeof d === 'string' ? d : d.name,
+              p.fontPx.detail, p.labelWrapWidth.detail)));
         const maxDetailLabel = detailLabelMs.length > 0
           ? Math.max(0, ...detailLabelMs.map(m => m.width))
           : 0;
 
         return {
-          causeLabelW, causeLabelLines, subSpread, maxSubLabel, maxSubLabelLines,
+          causeLabelW, causeLabelLines, subSpread, subMinLen: subLayoutLen,
+          maxSubLabel, maxSubLabelLines,
           hasDetails, subLen, maxDetailLabel, numSub,
         };
       });
@@ -376,11 +381,22 @@ class IshikawaDiagram {
           + (m.hasDetails ? p.detailLength + m.maxDetailLabel + 16 : 0),
         m.causeLabelW + 12,
       );
-      const rightSideMetrics = causeMetrics.filter((_, i) => i % 2 === 1);
-      const innerTipExtras = (rightSideMetrics.length
-        ? Math.max(...rightSideMetrics.map(tipExtrasOf))
-        : 60) + p.innerSafeMargin;
-      const requiredMajorByInner = (90 + innerTipExtras) / (cosA * p.pairTMin);
+      // 内側 (右) の各原因を「実際の取り付け位置 (pairTs[k] + stagger)」で評価。
+      // その原因自身の小骨に必要な骨長 (subMinLen) と先端張り出しの両方が
+      // 背骨までの水平距離に収まる大骨長を要求する。
+      // これにより、実行時キャップで短縮された内側骨の小骨ラベルが
+      // 詰まりすぎて重なる問題を防ぐ。収まらない重量級データは
+      // 閾値超過で片側モードへ自然にフォールバックする。
+      const pairTsPreview = this.computeEvenT(numPairs, p.pairTMin, p.pairTMax);
+      let requiredMajorByInner = 0;
+      causeMetrics.forEach((m, i) => {
+        if (i % 2 !== 1) return;
+        const k = Math.floor(i / 2);
+        const tPos = (pairTsPreview[k] ?? p.pairTMax) + p.pairStaggerT;
+        const ownLen = Math.max(90, m.numSub > 0 ? m.subMinLen + 20 : 0);
+        const req = (ownLen + tipExtrasOf(m) + p.innerSafeMargin) / (cosA * tPos);
+        requiredMajorByInner = Math.max(requiredMajorByInner, req);
+      });
       const majorByBothSides = Math.max(
         440,
         requiredMajorByVerticalBoth,
@@ -861,7 +877,10 @@ class IshikawaDiagram {
     const ts = this.computeEvenT(sub.details.length, p.detailTMin, p.detailTMax);
     const horizontalDir = ctx.horizontalDir; // 親小骨と同じ向きで外側へ
 
-    return sub.details.map((detail, i) => {
+    return sub.details.map((detailRaw, i) => {
+      const detail = typeof detailRaw === 'string'
+        ? { name: detailRaw, important: false }
+        : detailRaw;
       const t = ts[i];
       const attachX = ctx.attachX + (ctx.endX - ctx.attachX) * t;
       const attachY = ctx.attachY + (ctx.endY - ctx.attachY) * t;
@@ -1001,11 +1020,11 @@ class IshikawaDiagram {
     const tipX = L.effectX - 4;
     const spineLine = this.createLine(
       L.spineStartX, L.spineY, tipX - 6, L.spineY,
-      5, this.style.spine
+      6, this.style.spine
     );
     this.mainGroup.appendChild(spineLine);
 
-    const arrow = this.createArrowhead(tipX, L.spineY, 0, 18, this.style.spine);
+    const arrow = this.createArrowhead(tipX, L.spineY, 0, 20, this.style.spine);
     this.mainGroup.appendChild(arrow);
   }
 
@@ -1065,13 +1084,13 @@ class IshikawaDiagram {
     // 大骨 (カテゴリ色で系統をグルーピング)
     const boneLine = this.createLine(
       info.spineX, info.spineY, info.boneEndX, info.boneEndY,
-      3.5, color.fill
+      4.2, color.fill
     );
     this.mainGroup.appendChild(boneLine);
 
     // 矢印（背骨上に向かう）
     const arrowAngle = Math.atan2(info.spineY - info.boneEndY, info.spineX - info.boneEndX) * 180 / Math.PI;
-    const arrow = this.createArrowhead(info.spineX, info.spineY, arrowAngle, 10, color.fill);
+    const arrow = this.createArrowhead(info.spineX, info.spineY, arrowAngle, 12, color.fill);
     this.mainGroup.appendChild(arrow);
 
     // カテゴリボックス（大骨先端中心、カテゴリ色）
@@ -1109,7 +1128,7 @@ class IshikawaDiagram {
     const line = this.createLine(
       causeInfo.startX, causeInfo.startY,
       causeInfo.attachX, causeInfo.attachY,
-      2.2, this.style.cause
+      2.6, this.style.cause
     );
     this.mainGroup.appendChild(line);
 
@@ -1118,7 +1137,7 @@ class IshikawaDiagram {
     // RIGHT cause: free end は右、attach は左 → 矢印は左向き (angle=180)
     const arrowAngle = isLeft ? 0 : 180;
     const arrow = this.createArrowhead(
-      causeInfo.attachX, causeInfo.attachY, arrowAngle, 9, this.style.cause
+      causeInfo.attachX, causeInfo.attachY, arrowAngle, 10, this.style.cause
     );
     this.mainGroup.appendChild(arrow);
 
@@ -1142,6 +1161,13 @@ class IshikawaDiagram {
       0  // 中央揃え
     );
     labelGroup.appendChild(labelText);
+    if (causeInfo.cause.important) {
+      labelGroup.insertBefore(
+        this.createImportanceEllipse(
+          labelX, causeInfo.startY + labelDy, lines, p.fontPx.cause, anchor, 0),
+        labelText
+      );
+    }
     this.makeGroupDraggable(labelGroup, 'cause', causeInfo.cause);
     this.mainGroup.appendChild(labelGroup);
     this.elements.push({ type: 'cause', element: labelGroup, data: causeInfo.cause });
@@ -1159,7 +1185,7 @@ class IshikawaDiagram {
     const line = this.createLine(
       subInfo.endX, subInfo.endY,
       subInfo.attachX, subInfo.attachY,
-      1.5, this.style.subcause
+      1.8, this.style.subcause
     );
     this.mainGroup.appendChild(line);
 
@@ -1169,7 +1195,7 @@ class IshikawaDiagram {
       subInfo.attachX - subInfo.endX,
     ) * 180 / Math.PI;
     const arrow = this.createArrowhead(
-      subInfo.attachX, subInfo.attachY, arrowAngle, 7, this.style.subcause
+      subInfo.attachX, subInfo.attachY, arrowAngle, 8, this.style.subcause
     );
     this.mainGroup.appendChild(arrow);
 
@@ -1198,6 +1224,13 @@ class IshikawaDiagram {
       verticalDir  // UP 小骨は上へ、DOWN 小骨は下へ積む
     );
     labelGroup.appendChild(labelText);
+    if (subInfo.sub.important) {
+      labelGroup.insertBefore(
+        this.createImportanceEllipse(
+          labelAnchorX, labelAnchorY + labelDy, lines, p.fontPx.subcause, anchor, verticalDir),
+        labelText
+      );
+    }
     this.makeGroupDraggable(labelGroup, 'subcause', subInfo.sub);
     this.mainGroup.appendChild(labelGroup);
     this.elements.push({ type: 'subcause', element: labelGroup, data: subInfo.sub });
@@ -1215,7 +1248,7 @@ class IshikawaDiagram {
     const line = this.createLine(
       detailInfo.startX, detailInfo.startY,
       detailInfo.attachX, detailInfo.attachY,
-      1.0, this.style.detail
+      1.2, this.style.detail
     );
     this.mainGroup.appendChild(line);
 
@@ -1223,7 +1256,7 @@ class IshikawaDiagram {
     // LEFT: arrow points right (angle=0), RIGHT: arrow points left (angle=180)
     const arrowAngle = isLeft ? 0 : 180;
     const arrow = this.createArrowhead(
-      detailInfo.attachX, detailInfo.attachY, arrowAngle, 5, this.style.detail
+      detailInfo.attachX, detailInfo.attachY, arrowAngle, 6, this.style.detail
     );
     this.mainGroup.appendChild(arrow);
 
@@ -1234,8 +1267,9 @@ class IshikawaDiagram {
     const labelDy = subVDir * 7;  // 親小骨方向に追従
     const labelX = detailInfo.startX + (isLeft ? -2 : 2);
     const anchor = isLeft ? 'end' : 'start';
+    const detailName = detailInfo.detail.name;
     const lines = this.wrapLabel(
-      detailInfo.detail, p.fontPx.detail, p.labelWrapWidth.detail);
+      detailName, p.fontPx.detail, p.labelWrapWidth.detail);
     const labelText = this.createWrappedText(
       labelX,
       detailInfo.startY + labelDy,
@@ -1246,9 +1280,16 @@ class IshikawaDiagram {
       subVDir
     );
     labelGroup.appendChild(labelText);
-    this.makeGroupDraggable(labelGroup, 'detail', { name: detailInfo.detail });
+    if (detailInfo.detail.important) {
+      labelGroup.insertBefore(
+        this.createImportanceEllipse(
+          labelX, detailInfo.startY + labelDy, lines, p.fontPx.detail, anchor, subVDir),
+        labelText
+      );
+    }
+    this.makeGroupDraggable(labelGroup, 'detail', { name: detailName });
     this.mainGroup.appendChild(labelGroup);
-    this.elements.push({ type: 'detail', element: labelGroup, data: { name: detailInfo.detail } });
+    this.elements.push({ type: 'detail', element: labelGroup, data: { name: detailName } });
   }
 
   // ===== SVG 要素ユーティリティ =====
@@ -1332,6 +1373,35 @@ class IshikawaDiagram {
       t.appendChild(tspan);
     });
     return t;
+  }
+
+  /**
+   * 重要要因の丸囲み (QC の慣習: 重要と思われる要因を赤楕円で囲む)
+   * createWrappedText と同じ配置ロジックでラベルブロックを囲む楕円を作る
+   */
+  createImportanceEllipse(x, y, lines, fontSize, textAnchor, stackDir = 0) {
+    const lineH = fontSize + 3;
+    const n = lines.length;
+    let y0;
+    if (stackDir < 0) y0 = y - (n - 1) * lineH;
+    else if (stackDir > 0) y0 = y;
+    else y0 = y - ((n - 1) * lineH) / 2;
+    const cy = y0 + ((n - 1) * lineH) / 2;
+    const w = Math.max(...lines.map(l => this.estimateTextWidth(l, fontSize)));
+    const blockH = (n - 1) * lineH + fontSize;
+    let cx;
+    if (textAnchor === 'end') cx = x - w / 2;
+    else if (textAnchor === 'start') cx = x + w / 2;
+    else cx = x;
+    const ellipse = document.createElementNS('http://www.w3.org/2000/svg', 'ellipse');
+    ellipse.setAttribute('cx', cx);
+    ellipse.setAttribute('cy', cy);
+    ellipse.setAttribute('rx', w / 2 + 14);
+    ellipse.setAttribute('ry', blockH / 2 + 9);
+    ellipse.setAttribute('fill', 'none');
+    ellipse.setAttribute('stroke', '#d63031');
+    ellipse.setAttribute('stroke-width', 2.4);
+    return ellipse;
   }
 
   /**
@@ -1580,7 +1650,8 @@ class IshikawaDiagram {
 
   // ===== エクスポート =====
 
-  exportAsPNG() {
+  exportAsPNG(scale = 2) {
+    // 高解像度エクスポート (既定 2 倍) — 印刷・スライド貼付でも文字が鮮明
     const svgClone = this.svg.cloneNode(true);
     const w = this.layout.svgWidth;
     const h = this.layout.svgHeight;
@@ -1595,12 +1666,13 @@ class IshikawaDiagram {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     const img = new Image();
-    canvas.width = w;
-    canvas.height = h;
+    canvas.width = Math.round(w * scale);
+    canvas.height = Math.round(h * scale);
 
     img.onload = () => {
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.setTransform(scale, 0, 0, scale, 0, 0);
       ctx.drawImage(img, 0, 0);
       canvas.toBlob(blob => {
         const a = document.createElement('a');

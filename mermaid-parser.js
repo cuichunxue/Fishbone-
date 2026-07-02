@@ -65,8 +65,10 @@ class MermaidParser {
       if (trimmedLine.startsWith('cause ') && currentCategory) {
         // インデントが前のcauseと同じか、categoryより1段深い場合
         if (indent <= indentStack[0] + 2) {
+          const causeParsed = this.parseImportance(this.extractQuotedText(trimmedLine));
           currentCause = {
-            name: this.extractQuotedText(trimmedLine),
+            name: causeParsed.name,
+            important: causeParsed.important,
             subcauses: []
           };
           currentCategory.causes.push(currentCause);
@@ -82,8 +84,10 @@ class MermaidParser {
 
       // subcause（小骨・副原因）を解析
       if (trimmedLine.startsWith('subcause ') && currentCause) {
+        const subParsed = this.parseImportance(this.extractQuotedText(trimmedLine));
         currentSubcause = {
-          name: this.extractQuotedText(trimmedLine),
+          name: subParsed.name,
+          important: subParsed.important,
           details: []
         };
         currentCause.subcauses.push(currentSubcause);
@@ -97,13 +101,31 @@ class MermaidParser {
 
       // detail（孫骨・詳細）を解析
       if (trimmedLine.startsWith('detail ') && currentSubcause) {
-        const detail = this.extractQuotedText(trimmedLine);
-        currentSubcause.details.push(detail);
+        const detailParsed = this.parseImportance(this.extractQuotedText(trimmedLine));
+        currentSubcause.details.push({
+          name: detailParsed.name,
+          important: detailParsed.important
+        });
         continue;
       }
     }
 
     return this.validateAndNormalize(this.data);
+  }
+
+  /**
+   * 末尾の "!" を重要要因マーカーとして解釈
+   * 例: cause "技能不足!" → { name: "技能不足", important: true }
+   * QC の慣習「重要と思われる要因を丸で囲む」を表現するための記法。
+   * @param {string} text - 抽出済みテキスト
+   * @returns {{name: string, important: boolean}}
+   */
+  parseImportance(text) {
+    const t = text || '';
+    if (t.endsWith('!') || t.endsWith('！')) {
+      return { name: t.slice(0, -1).trim(), important: true };
+    }
+    return { name: t, important: false };
   }
 
   /**
@@ -176,13 +198,17 @@ class MermaidParser {
       output += `  category "${category.name}"\n`;
 
       for (const cause of category.causes) {
-        output += `    cause "${cause.name}"\n`;
+        const causeMark = cause.important ? '!' : '';
+        output += `    cause "${cause.name}${causeMark}"\n`;
 
         for (const subcause of cause.subcauses) {
-          output += `      subcause "${subcause.name}"\n`;
+          const subMark = subcause.important ? '!' : '';
+          output += `      subcause "${subcause.name}${subMark}"\n`;
 
           for (const detail of subcause.details) {
-            output += `        detail "${detail}"\n`;
+            const dName = typeof detail === 'string' ? detail : detail.name;
+            const dMark = (detail && detail.important) ? '!' : '';
+            output += `        detail "${dName}${dMark}"\n`;
           }
         }
       }

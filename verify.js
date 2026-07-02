@@ -735,6 +735,29 @@ const DATASETS = {
       subcause "副く一"
       subcause "副く二"`,
 
+  '36-importance-marks': `ishikawa
+  effect "不良率が高い"
+  category "機械"
+    cause "設備老朽化!"
+      subcause "メンテナンス不足!"
+        detail "点検頻度低い!"
+        detail "予算不足"
+      subcause "部品摩耗"
+    cause "温度管理不良"
+      subcause "センサー故障"
+  category "人"
+    cause "技能不足!"
+      subcause "研修不足"
+    cause "疲労蓄積"
+  category "材料"
+    cause "品質バラツキ"
+      subcause "ロット管理不良!"
+    cause "保管環境不適切"
+  category "方法"
+    cause "標準化不足"
+      subcause "各自の方法"
+    cause "チェック体制不十分!"`,
+
   '35-mixed-lengths': `ishikawa
   effect "長短混在"
   category "混在A"
