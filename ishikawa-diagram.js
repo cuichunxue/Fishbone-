@@ -95,7 +95,7 @@ class IshikawaDiagram {
       detailTMin: 0.30,
       detailTMax: 0.76,
 
-      causeSpacingAlongBone: 110,
+      causeSpacingAlongBone: 96,
       subcauseSpacingAlongCause: 80,
 
       // 親骨の長さは "展開される子骨の本数" の 2 本ごとに段階的に伸ばす
@@ -117,7 +117,7 @@ class IshikawaDiagram {
       // 両側配置の判定閾値: 大骨長がこれを超えるなら片側配置に切替
       bothSidesMaxBoneLength: 1800,
       // 最小描画範囲 (空きカテゴリでも視覚を保つ)
-      minCanvasHeight: 600,
+      minCanvasHeight: 520,
       minCanvasWidth: 900,
 
       fontPx: {
@@ -127,8 +127,8 @@ class IshikawaDiagram {
         subcause: 12,
         detail: 11,
       },
-      sideMarginX: 90,
-      verticalMargin: 80,
+      sideMarginX: 70,
+      verticalMargin: 56,
       causeLabelGap: 18,
       subcauseLabelGap: 12,
       detailLabelGap: 6,
@@ -331,13 +331,19 @@ class IshikawaDiagram {
       );
 
       // === 大骨長を 2 通り計算して、両側 / 片側を選択 ===
-      // 新ルール: 小骨は上下交互に展開するため、
-      //   隣接中骨間で「DOWN 小骨 + UP 小骨」が衝突しないよう
-      //   縦方向の中骨間隔が 2 × 小骨垂直展開 以上必要
-      // 折返しでラベルが 2 行になる場合はその分も加算
-      const verticalNeedBetweenCauses = hasAnySubcauses
-        ? (2 * subLenLong * sinS + 50 + 2 * subLabelExtraH + causeLabelExtraH)
-        : 60 + causeLabelExtraH;
+      // 縦間隔: 隣接する中骨の間には
+      //   「手前の中骨の外側小骨」+「奥の中骨の内側小骨」が入る。
+      //   外側小骨は小骨 1 本以上、内側小骨は小骨 2 本以上で初めて使われる。
+      //   実データの使用状況に応じて必要分だけ確保する (スカスカ防止)。
+      const anyOuterSub = cat.causes.some(c => c.subcauses.length >= 1);
+      const anyInnerSub = cat.causes.some(c => c.subcauses.length >= 2);
+      const sideNeed = subLenLong * sinS + subLabelExtraH + p.subcauseLabelGap;
+      const outerNeed = anyOuterSub ? sideNeed : 0;
+      const innerNeed = anyInnerSub ? sideNeed : 0;
+      const verticalNeedBetweenCauses = Math.max(
+        60,
+        outerNeed + innerNeed + 36 + causeLabelExtraH,
+      );
 
       // 両側配置: ペア間隔 (縦) + 内側中骨が最低限の長さを確保できる条件
       const pairTRange = p.pairTMax - p.pairTMin;
@@ -345,15 +351,23 @@ class IshikawaDiagram {
         ? 0
         : verticalNeedBetweenCauses * (numPairs - 1) / (sinA * pairTRange);
       // 内側中骨はフル長を要求しない (実行時に安全長へ自動キャップされる)。
-      // ただし骨が短すぎると不格好なため、最低 90px + 先端の張り出し
-      // (ラベル or 小骨連鎖の大きい方) が確保できる大骨長を要求する。
-      const innerTipExtras = Math.max(
-        subHorizontalOuter + detailHorizontalOuter,
-        maxCauseLabelW + 12,
-      ) + p.innerSafeMargin;
+      // ただし骨が短すぎると不格好なため、最低 90px + 先端の張り出しが
+      // 確保できる大骨長を要求する。
+      // 張り出しは「実際に内側 (奇数番目) に配置される原因」だけで評価する
+      // — 最重量の原因は外側 (偶数番目) にあることが多く、
+      //   カテゴリ全体の最大値で計算すると大骨が無駄に長くなる。
+      const tipExtrasOf = m => Math.max(
+        (m.numSub > 0 ? m.subLen * cosS : 0)
+          + (m.hasDetails ? p.detailLength + m.maxDetailLabel + 16 : 0),
+        m.causeLabelW + 12,
+      );
+      const rightSideMetrics = causeMetrics.filter((_, i) => i % 2 === 1);
+      const innerTipExtras = (rightSideMetrics.length
+        ? Math.max(...rightSideMetrics.map(tipExtrasOf))
+        : 60) + p.innerSafeMargin;
       const requiredMajorByInner = (90 + innerTipExtras) / (cosA * p.pairTMin);
       const majorByBothSides = Math.max(
-        500,
+        440,
         requiredMajorByVerticalBoth,
         requiredMajorByInner,
       );
@@ -367,7 +381,7 @@ class IshikawaDiagram {
         ? 0
         : p.causeSpacingAlongBone * (numCauses - 1) / singleTRange;
       const majorBySingleSide = Math.max(
-        460,
+        420,
         requiredMajorByVerticalSingle,
         requiredMajorBySpacingSingle,
       );
@@ -414,7 +428,7 @@ class IshikawaDiagram {
     categoryInfos.forEach(c => {
       c.layoutMode = (globalPair && c.numCauses >= 2) ? 'pair' : 'single';
     });
-    const globalL = Math.max(500, ...categoryInfos.map(c =>
+    const globalL = Math.max(440, ...categoryInfos.map(c =>
       c.layoutMode === 'pair' ? c.majorByBothSides : c.majorBySingleSide
     ));
 
@@ -693,13 +707,18 @@ class IshikawaDiagram {
       } else {
         direction = 1;
         // 内側中骨の最大長: 先端の中骨ラベル・小骨/孫骨連鎖のいずれも
-        // 背骨に届かない距離に制限する
-        const distToSpine = info.spineX - attachX;
-        const innerExtras = Math.max(
-          info.subHorizontalOuter + info.detailHorizontalOuter,
-          info.maxCauseLabelW + 12,
+        // 背骨に届かない距離に制限する。
+        // 張り出しは「この原因が実際に持つ」ラベル/小骨で評価する
+        // (カテゴリ最大値だと必要以上に短くなる)
+        const m = info.causeMetrics[i] || {};
+        const cosS = Math.cos((p.subcauseAngleDeg * Math.PI) / 180);
+        const ownTipExtras = Math.max(
+          ((m.numSub || 0) > 0 ? (m.subLen || 0) * cosS : 0)
+            + (m.hasDetails ? p.detailLength + (m.maxDetailLabel || 0) + 16 : 0),
+          (m.causeLabelW || 60) + 12,
         ) + p.innerSafeMargin;
-        const maxInner = distToSpine - innerExtras;
+        const distToSpine = info.spineX - attachX;
+        const maxInner = distToSpine - ownTipExtras;
         causeLen = Math.max(80, Math.min(info.causeLength, maxInner));
       }
 
