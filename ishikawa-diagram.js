@@ -382,7 +382,16 @@ class IshikawaDiagram {
       const tMaxForExtents = (info.layoutMode === 'pair')
         ? p.pairTMax + p.pairStaggerT : p.singleTMax;
       info.farthestCauseY = globalL * sinA * tMaxForExtents;
-      info.categoryVertical = info.farthestCauseY + info.subVertical + 24;
+      // 縦張り出しは「最遠中骨 + 小骨」と「大骨先端 + カテゴリボックス」の大きい方
+      // (大骨先端は t=1.0 なので、大型キャンバスでは中骨最遠点より遠くなる)
+      const boneTipVertical =
+        globalL * sinA
+        + p.categoryBoxHeight * 0.25 * sinA  // ボックス中心の先端側オフセット
+        + p.categoryBoxHeight / 2 + 14;
+      info.categoryVertical = Math.max(
+        info.farthestCauseY + info.subVertical + 24,
+        boneTipVertical,
+      );
       info.majorHorizontal = globalL * cosA;
       const farLeftFromSpine =
         globalL * cosA * tMaxForExtents +

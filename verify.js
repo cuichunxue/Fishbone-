@@ -440,6 +440,147 @@ const DATASETS = {
       subcause "D2a"
       subcause "D2b"
         detail "D2bX"`,
+
+  '21-5M-odd': `ishikawa
+  effect "設備総合効率低下"
+  category "機械"
+    cause "チョコ停多発"
+      subcause "センサー誤検知"
+    cause "サイクルタイム悪化"
+  category "人"
+    cause "段取り時間長い"
+      subcause "手順未標準化"
+    cause "熟練者不足"
+  category "材料"
+    cause "材料待ち"
+    cause "不良材混入"
+  category "方法"
+    cause "計画精度低い"
+      subcause "需要予測外れ"
+    cause "ロット設計不適"
+  category "測定"
+    cause "データ収集手動"
+      subcause "記入漏れ"
+    cause "リアルタイム性なし"`,
+
+  '22-7M-wide': `ishikawa
+  effect "サービス品質低下"
+  category "人"
+    cause "採用難"
+    cause "定着率低い"
+  category "設備"
+    cause "老朽化"
+  category "材料"
+    cause "調達遅延"
+  category "方法"
+    cause "手順複雑"
+    cause "例外多い"
+  category "測定"
+    cause "KPI不明確"
+  category "環境"
+    cause "騒音"
+  category "管理"
+    cause "権限不明確"
+    cause "報告遅い"`,
+
+  '23-long-effect': `ishikawa
+  effect "第三四半期における主力製品の顧客クレーム件数が前年同期比で大幅に増加している"
+  category "製品"
+    cause "設計変更影響"
+      subcause "検証不足"
+    cause "部品変更"
+  category "工程"
+    cause "新ライン立上げ"
+      subcause "作業者慣れ不足"
+    cause "検査基準変更"`,
+
+  '24-max-density': `ishikawa
+  effect "最大密度テスト"
+  category "機械"
+    cause "原因A"
+      subcause "副A1"
+        detail "詳A1a"
+        detail "詳A1b"
+        detail "詳A1c"
+      subcause "副A2"
+        detail "詳A2a"
+        detail "詳A2b"
+        detail "詳A2c"
+      subcause "副A3"
+        detail "詳A3a"
+        detail "詳A3b"
+      subcause "副A4"
+        detail "詳A4a"
+    cause "原因B"
+      subcause "副B1"
+        detail "詳B1a"
+        detail "詳B1b"
+      subcause "副B2"
+      subcause "副B3"
+      subcause "副B4"
+    cause "原因C"
+      subcause "副C1"
+      subcause "副C2"
+      subcause "副C3"
+    cause "原因D"
+      subcause "副D1"
+      subcause "副D2"
+    cause "原因E"
+      subcause "副E1"
+    cause "原因F"
+  category "人"
+    cause "原因G"
+      subcause "副G1"
+        detail "詳G1a"
+      subcause "副G2"
+    cause "原因H"
+      subcause "副H1"
+    cause "原因I"`,
+
+  '25-empty-category': `ishikawa
+  effect "空カテゴリ耐性"
+  category "実データ"
+    cause "原因X"
+      subcause "副X1"
+    cause "原因Y"
+  category "空っぽ"
+  category "もう一つ"
+    cause "原因Z"`,
+
+  '26-two-singles': `ishikawa
+  effect "最小ペア"
+  category "上側"
+    cause "唯一の上原因"
+  category "下側"
+    cause "唯一の下原因"`,
+
+  '27-english-long': `ishikawa
+  effect "Deployment failures increasing"
+  category "Infrastructure"
+    cause "Kubernetes misconfiguration"
+      subcause "Resource limits missing"
+        detail "OOMKilled pods"
+    cause "Flaky CI runners"
+  category "Process"
+    cause "No canary deployments"
+      subcause "All-at-once rollout"
+    cause "Insufficient rollback automation"
+  category "People"
+    cause "On-call fatigue"
+    cause "Knowledge silos"`,
+
+  '28-one-char': `ishikawa
+  effect "短"
+  category "甲"
+    cause "a"
+      subcause "b"
+        detail "c"
+      subcause "d"
+    cause "e"
+  category "乙"
+    cause "f"
+      subcause "g"
+    cause "h"`,
 };
 
 async function runChecks(page) {
