@@ -130,8 +130,6 @@ class IshikawaDiagram {
       effectBoxMaxHeight: 360,
       spineEndPadding: 110,
       innerSafeMargin: 26,
-      // 両側配置の判定閾値: 大骨長がこれを超えるなら片側配置に切替
-      bothSidesMaxBoneLength: 1800,
       // 最小描画範囲 (空きカテゴリでも視覚を保つ)
       minCanvasHeight: 520,
       minCanvasWidth: 900,
@@ -447,17 +445,14 @@ class IshikawaDiagram {
     });
 
     // ---- 図全体で統一するモードと大骨長を決定 ----
-    // ルール (図の統一感 = 教科書的な見た目のため、モードは図全体で 1 つ):
-    //   1. 中骨 2 本以上の全カテゴリが両側配置の閾値内 → 図全体を P (両側)
-    //   2. 1 つでも閾値を超える → 図全体を S (片側) にフォールバック
-    //   3. 中骨 1 本のカテゴリはペア不可なので常に S (見た目は単に中骨 1 本)
-    // 統一 L = 全カテゴリの選択モードでの必要 L の最大値
+    // 特性要因図の基本ルール: 中骨は大骨の両側に配置する。
+    // データがどれだけ密でも (キャンバスが大きくなっても) この原則を優先し、
+    // 片側配置へのフォールバックは行わない。
+    // 中骨 1 本のカテゴリのみ、ペアを組む相手がいないため単側になる。
+    // 統一 L = 全カテゴリの必要 L の最大値
     //   ⇒ 大骨先端 Y がカテゴリ間で揃い、視覚バランスが取れる
-    const multiCauseCats = categoryInfos.filter(c => c.numCauses >= 2);
-    const globalPair = multiCauseCats.length > 0 &&
-      multiCauseCats.every(c => c.majorByBothSides <= p.bothSidesMaxBoneLength);
     categoryInfos.forEach(c => {
-      c.layoutMode = (globalPair && c.numCauses >= 2) ? 'pair' : 'single';
+      c.layoutMode = c.numCauses >= 2 ? 'pair' : 'single';
     });
     const globalL = Math.max(440, ...categoryInfos.map(c =>
       c.layoutMode === 'pair' ? c.majorByBothSides : c.majorBySingleSide
