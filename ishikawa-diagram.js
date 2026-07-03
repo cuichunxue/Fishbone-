@@ -515,82 +515,34 @@ class IshikawaDiagram {
     const svgHeight = halfHeight * 2;
     const spineY = halfHeight;
 
-    // 3) 同じ側で隣接するカテゴリの spine X 間隔を決定
-    // 隣接 spine X 間隔は、両カテゴリの horizontalExtentFromSpine を考慮して決める
-    // 単純化: 同じ側のカテゴリ間距離 = 両側の horizontalExtentFromSpine の合計 + 安全マージン
+    // 3) カテゴリを「列 (ペア)」単位で配置する
+    // 入力データの並び順は元々 4M の慣習で「機械, 人, 材料, 方法」のように
+    // 上下交互 (idx%2 で isTop 判定) に並ぶため、連続する 2 件
+    // (idx=2k を上、idx=2k+1 を下) は視覚的に「同じ列」として対応する
+    // カテゴリだと期待できる (機械/人が左列、材料/方法が右列、など)。
+    // この列単位で同じ spineX を共有させることで、上下対称かつ
+    // 左右に整列した「教科書通りの 4M レイアウト」を実現する。
     const safetyGap = 60;
+    const pairCount = Math.ceil(categoryInfos.length / 2);
+    const columns = [];
+    for (let k = 0; k < pairCount; k++) {
+      const top = categoryInfos.find(c => c.idx === 2 * k && c.isTop);
+      const bot = categoryInfos.find(c => c.idx === 2 * k + 1 && !c.isTop);
+      columns.push([top, bot].filter(Boolean));
+    }
 
-    const sideSpacings = side => {
-      const infos = side === 'top' ? topInfos : botInfos;
-      const gaps = [];
-      for (let i = 0; i < infos.length - 1; i++) {
-        const a = infos[i];
-        const b = infos[i + 1];
-        // 左側カテゴリ b は右側カテゴリ a より右にある（spineXが大きい）
-        // a の左端は a.spineX - a.horizontalExtentFromSpine
-        // b の左端は b.spineX - b.horizontalExtentFromSpine
-        // 隣接するために b.spineX - a.spineX > a.horizontalExtentFromSpine となれば良いが、
-        // しかし b の中骨群も a の上に被るため、両方の左方向の最大張り出しを考える必要はない。
-        // 安全側に: 単に a の張り出し + safetyGap で十分。
-        gaps.push(a.horizontalExtentFromSpine + safetyGap);
-      }
-      return gaps;
-    };
-
-    const topGaps = sideSpacings('top');
-    const botGaps = sideSpacings('bottom');
-
-    // 各カテゴリの spine X を決定
-    // 上側を左→右に並べ、下側を左→右に並べる
-    // top: idx順 0,2,4,...; bottom: 1,3,5,...
-    // ただしユーザ視覚では「左から順番に並んでいる」のが分かりやすいので
-    // 上下は背骨上で似た X を取らない方が読みやすい → 上と下を交互配置でずらす
-
-    // 上下それぞれの最左端
-    // 最左の spine X = sideMarginX + 各カテゴリの最大の左方向張り出し + α
-    const leftMostTop = topInfos.length
-      ? Math.max(...topInfos.map(c => c.horizontalExtentFromSpine))
-      : 0;
-    const leftMostBot = botInfos.length
-      ? Math.max(...botInfos.map(c => c.horizontalExtentFromSpine))
-      : 0;
-
-    const startXTop = p.sideMarginX + leftMostTop;
-    const startXBot = p.sideMarginX + leftMostBot;
-
-    // 上下の spine X を計算
-    let xTop = startXTop;
-    topInfos.forEach((c, i) => {
-      if (i > 0) {
-        xTop += topGaps[i - 1];
-      }
-      c.spineX = xTop;
+    let cursor = null;
+    columns.forEach(members => {
+      const extent = Math.max(...members.map(c => c.horizontalExtentFromSpine));
+      const x = cursor === null
+        ? p.sideMarginX + extent
+        : cursor + extent + safetyGap;
+      members.forEach(c => { c.spineX = x; });
+      cursor = x;
     });
 
-    let xBot = startXBot;
-    botInfos.forEach((c, i) => {
-      if (i > 0) {
-        xBot += botGaps[i - 1];
-      }
-      c.spineX = xBot;
-    });
-
-    // 上下交互配置で見栄えを良くする: 同じインデックス順に並べたい
-    // → 元々 idx % 2 で上下分けているので、上の i 番目 と 下の i 番目 を「半ずらし」でずらす
-    // しかし計算上は spine の右端を統一する方が安全。
-
-    // 4) spine の最右端: 最も右にあるカテゴリの spine X + 余裕
-    const lastTopX = topInfos.length ? topInfos[topInfos.length - 1].spineX : 0;
-    const lastBotX = botInfos.length ? botInfos[botInfos.length - 1].spineX : 0;
-    let lastCategoryX = Math.max(lastTopX, lastBotX);
-
-    // 上下を「均等に上下」感覚で配置するため、両側のスパンが大きい方に合わせて空きを補正
-    // 上下交互で背骨 X を再アライン: top[i] と bottom[i] の中点が一定間隔で並ぶようにする
-    this.alignTopBottom(topInfos, botInfos, p.sideMarginX);
-
-    lastCategoryX = Math.max(
-      ...categoryInfos.map(c => c.spineX),
-    );
+    // 4) spine の最右端: 最後の列の spine X
+    let lastCategoryX = cursor ?? p.sideMarginX;
 
     // spine 終端: 最後の category から余裕を持って延長 (背骨先端の余地)
     const spineEndX = lastCategoryX + 100;
@@ -636,47 +588,6 @@ class IshikawaDiagram {
       angleRad: rad,
       subAngleRad: subRad,
     };
-  }
-
-  /**
-   * 上下カテゴリの spine X を交互に並ぶように再配置
-   */
-  alignTopBottom(topInfos, botInfos, marginX) {
-    const all = [...topInfos, ...botInfos].sort((a, b) => a.idx - b.idx);
-    if (all.length === 0) return;
-
-    // 全体を等間隔で並べる: 各カテゴリの最大の左方向張り出しを考慮した最小間隔を確保
-    // 単純な再配置: idx 順に並べ、隣接 (idx, idx+1) の中で同じ側であれば張り出しガード
-    // ここでは「上下を 1 つずつ交互に置く」前提
-    const minStart = marginX + Math.max(...all.map(c => c.horizontalExtentFromSpine));
-    let cursor = minStart;
-    let lastSameSideX = { top: -Infinity, bottom: -Infinity };
-
-    all.forEach((c, i) => {
-      let placedX = cursor;
-      const side = c.isTop ? 'top' : 'bottom';
-      // 同じ側で前のカテゴリとの最小距離を確保
-      const prevSameX = lastSameSideX[side];
-      if (prevSameX > -Infinity) {
-        const prevSame = all
-          .filter(x => x.isTop === c.isTop)
-          .find(x => x.spineX === prevSameX);
-        const requiredGap =
-          (prevSame ? prevSame.horizontalExtentFromSpine : 0) +
-          c.horizontalExtentFromSpine * 0.0 + // 自身の左張り出しは前カテゴリの右側
-          60;
-        placedX = Math.max(placedX, prevSameX + requiredGap);
-      }
-      // 隣接する反対側カテゴリ（idx-1）との最小距離 (上下が背骨上で接近しすぎないよう)
-      if (i > 0) {
-        const prev = all[i - 1];
-        const horizontalNeed = Math.max(60, c.horizontalExtentFromSpine * 0.4);
-        placedX = Math.max(placedX, prev.spineX + horizontalNeed);
-      }
-      c.spineX = placedX;
-      lastSameSideX[side] = placedX;
-      cursor = placedX;
-    });
   }
 
   /**
