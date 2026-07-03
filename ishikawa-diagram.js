@@ -154,6 +154,7 @@ class IshikawaDiagram {
         cause: 180,     // 約 12 全角文字
         subcause: 143,  // 約 11 全角文字
         detail: 108,    // 約 9 全角文字
+        category: 200,  // 約 14 全角文字 (超えると2行、ボックス自体も拡幅)
       },
     };
   }
@@ -247,6 +248,17 @@ class IshikawaDiagram {
       const numCauses = Math.max(1, cat.causes.length);
       const numPairs = Math.ceil(numCauses / 2);
 
+      // カテゴリ名も長文なら折返し、ボックス自体を拡幅・拡高する
+      // (固定幅のままだと長いカテゴリ名がボックスからはみ出しキャンバス外で
+      // 切れてしまうため、cause/subcause/detail と同じ折返しルールを適用)
+      const catLabelM = this.wrappedLabelMetrics(
+        cat.name, p.fontPx.category, p.labelWrapWidth.category);
+      const categoryBoxWidth = Math.max(p.categoryBoxWidth, catLabelM.width + 28);
+      const categoryBoxHeight = Math.max(
+        p.categoryBoxHeight,
+        catLabelM.lineCount * (p.fontPx.category + 6) + 20
+      );
+
       const causeMetrics = cat.causes.map(cause => {
         // ラベルは labelWrapWidth を超えると 2 行に折り返される前提で幅を推定
         const causeLabelM = this.wrappedLabelMetrics(
@@ -307,7 +319,10 @@ class IshikawaDiagram {
         };
       });
 
-      return { category: cat, idx, isTop, numCauses, numPairs, causeMetrics };
+      return {
+        category: cat, idx, isTop, numCauses, numPairs, causeMetrics,
+        categoryBoxWidth, categoryBoxHeight, catLabelLines: catLabelM.lines,
+      };
     });
 
     // 2) 「同じ層の親骨」の長さを図全体で統一する
@@ -337,7 +352,10 @@ class IshikawaDiagram {
 
     // 3) 統一された長さを使い、各カテゴリの派生量を計算
     const categoryInfos = categoryBasics.map(basic => {
-      const { category: cat, idx, isTop, numCauses, numPairs, causeMetrics } = basic;
+      const {
+        category: cat, idx, isTop, numCauses, numPairs, causeMetrics,
+        categoryBoxWidth, categoryBoxHeight, catLabelLines,
+      } = basic;
       const causeLength = globalCauseLength;
       const subLenLong = globalSubLen;
       const hasAnySubcauses = cat.causes.some(c => c.subcauses.length > 0);
@@ -472,6 +490,9 @@ class IshikawaDiagram {
         maxCauseLabelW,
         hasAnySubcauses,
         hasAnyDetails,
+        categoryBoxWidth,
+        categoryBoxHeight,
+        catLabelLines,
       };
     });
 
@@ -499,10 +520,12 @@ class IshikawaDiagram {
       info.farthestCauseY = globalL * sinA * tMaxForExtents;
       // 縦張り出しは「最遠中骨 + 小骨」と「大骨先端 + カテゴリボックス」の大きい方
       // (大骨先端は t=1.0 なので、大型キャンバスでは中骨最遠点より遠くなる)
+      // ボックスサイズはカテゴリ名の長さに応じて拡幅・拡高されるため、
+      // 固定値 p.categoryBoxHeight/Width ではなくカテゴリ毎の実サイズを使う
       const boneTipVertical =
         globalL * sinA
-        + p.categoryBoxHeight * 0.25 * sinA  // ボックス中心の先端側オフセット
-        + p.categoryBoxHeight / 2 + 14;
+        + info.categoryBoxHeight * 0.25 * sinA  // ボックス中心の先端側オフセット
+        + info.categoryBoxHeight / 2 + 14;
       info.categoryVertical = Math.max(
         info.farthestCauseY + info.subVertical + 24,
         boneTipVertical,
@@ -512,7 +535,7 @@ class IshikawaDiagram {
       const farLeftFromSpine =
         globalL * cosA * tMaxForExtents + info.beyondAttachHorizontal;
       info.horizontalExtentFromSpine = Math.max(
-        info.majorHorizontal + p.categoryBoxWidth * 0.55 + 24,
+        info.majorHorizontal + info.categoryBoxWidth * 0.55 + 24,
         farLeftFromSpine + 20,
       );
     });
@@ -630,7 +653,7 @@ class IshikawaDiagram {
     info.boneEndY = spineY + sign * info.majorBoneLength * sinA;
 
     // カテゴリボックスの位置: 大骨先端から少し外側へオフセット
-    const boxOffset = p.categoryBoxHeight * 0.25;
+    const boxOffset = info.categoryBoxHeight * 0.25;
     info.boxCenter = {
       x: info.boneEndX - boxOffset * cosA,
       y: info.boneEndY + sign * boxOffset * sinA,
@@ -1032,9 +1055,10 @@ class IshikawaDiagram {
     this.mainGroup.appendChild(arrow);
 
     // カテゴリボックス（大骨先端中心、カテゴリ色）
+    // ボックスサイズはカテゴリ名の長さに応じて拡幅・拡高される (長文で折返し)
     const group = this.createGroup();
-    const bw = p.categoryBoxWidth;
-    const bh = p.categoryBoxHeight;
+    const bw = info.categoryBoxWidth;
+    const bh = info.categoryBoxHeight;
     const bx = info.boxCenter.x - bw / 2;
     const by = info.boxCenter.y - bh / 2;
     const rect = this.createRect(
@@ -1043,11 +1067,12 @@ class IshikawaDiagram {
     );
     rect.setAttribute('filter', 'url(#boxShadow)');
     group.appendChild(rect);
-    const txt = this.createText(
+    const txt = this.createWrappedText(
       info.boxCenter.x, info.boxCenter.y,
-      info.category.name,
+      info.catLabelLines,
       p.fontPx.category, 'bold',
-      this.style.textLight, 'middle'
+      this.style.textLight, 'middle',
+      0
     );
     group.appendChild(txt);
     this.makeGroupDraggable(group, 'category', info.category);
