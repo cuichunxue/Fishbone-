@@ -239,13 +239,14 @@ class IshikawaDiagram {
     const numTop = Math.ceil(numCategories / 2);
     const numBottom = Math.floor(numCategories / 2);
 
-    // 1) 各カテゴリの中骨レイアウト指標を計算
-    const categoryInfos = data.categories.map((cat, idx) => {
+    // 1) 各カテゴリ・各原因の「必要な長さ」の材料 (causeMetrics) を計算
+    //    (この段階ではまだ長さを確定しない — 全体最大値を後で求めるため)
+    const tSubRange = p.subcauseTMax - p.subcauseTMin;
+    const categoryBasics = data.categories.map((cat, idx) => {
       const isTop = idx % 2 === 0;
       const numCauses = Math.max(1, cat.causes.length);
       const numPairs = Math.ceil(numCauses / 2);
 
-      const tSubRange = p.subcauseTMax - p.subcauseTMin;
       const causeMetrics = cat.causes.map(cause => {
         // ラベルは labelWrapWidth を超えると 2 行に折り返される前提で幅を推定
         const causeLabelM = this.wrappedLabelMetrics(
@@ -306,15 +307,34 @@ class IshikawaDiagram {
         };
       });
 
-      // 中骨長 (左右共通): カテゴリ内最大
-      const causeLength = Math.max(
-        p.causeBaseLength,
-        ...causeMetrics.map(m => Math.max(m.causeLabelW, m.subSpread, m.maxSubLabel + 40))
-      );
+      return { category: cat, idx, isTop, numCauses, numPairs, causeMetrics };
+    });
+
+    // 2) 「同じ層の親骨」の長さを図全体で統一する
+    //    中骨 (親=大骨、子=小骨の数) と 小骨 (親=中骨、子=孫骨の数) それぞれの
+    //    階層で、最も子骨数が多い (=最も長さを必要とする) ものを基準に
+    //    全ての同階層の親骨へ同じ長さを適用する。
+    //    これにより階層ごとに骨の長さが揃い、子が少ない骨だけが不釣り合いに
+    //    間延びする「スカスカ」を防ぎつつ、全体で一貫した見た目になる
+    //    (大骨長 globalL は既にこの方式で統一済み — 中骨・小骨も同じ考え方)。
+    const allCauseMetrics = categoryBasics.flatMap(c => c.causeMetrics);
+    const globalCauseLength = Math.max(
+      p.causeBaseLength,
+      ...allCauseMetrics.map(m => Math.max(m.causeLabelW, m.subSpread, m.maxSubLabel + 40))
+    );
+    const globalSubLen = Math.max(
+      p.subcauseLength,
+      ...allCauseMetrics.map(m => m.subLen)
+    );
+
+    // 3) 統一された長さを使い、各カテゴリの派生量を計算
+    const categoryInfos = categoryBasics.map(basic => {
+      const { category: cat, idx, isTop, numCauses, numPairs, causeMetrics } = basic;
+      const causeLength = globalCauseLength;
+      const subLenLong = globalSubLen;
       const hasAnySubcauses = cat.causes.some(c => c.subcauses.length > 0);
       const hasAnyDetails = cat.causes.some(c => c.subcauses.some(s => s.details.length > 0));
 
-      const subLenLong = Math.max(p.subcauseLength, ...causeMetrics.map(m => m.subLen));
       const maxSubLabelGlobal = Math.max(0, ...causeMetrics.map(m => m.maxSubLabel));
       const maxDetailLabelGlobal = Math.max(0, ...causeMetrics.map(m => m.maxDetailLabel));
       const maxCauseLabelW = Math.max(0, ...causeMetrics.map(m => m.causeLabelW));
@@ -374,8 +394,11 @@ class IshikawaDiagram {
       // 張り出しは「実際に内側 (奇数番目) に配置される原因」だけで評価する
       // — 最重量の原因は外側 (偶数番目) にあることが多く、
       //   カテゴリ全体の最大値で計算すると大骨が無駄に長くなる。
+      // 小骨長は同階層で統一済み (subLenLong) なので、実際に描画される
+      // 外側小骨の水平投影も subLenLong を基準に評価する (per-cause の
+      // m.subLen ではなく統一値を使う — 幾何計算との整合性のため)
       const tipExtrasOf = m => Math.max(
-        (m.numSub > 0 ? m.subLen * cosS : 0)
+        (m.numSub > 0 ? subLenLong * cosS : 0)
           + (m.hasDetails ? p.detailLength + m.maxDetailLabel + 16 : 0),
         m.causeLabelW + 12,
       );
@@ -645,12 +668,13 @@ class IshikawaDiagram {
         direction = 1;
         // 内側中骨の最大長: 先端の中骨ラベル・小骨/孫骨連鎖のいずれも
         // 背骨に届かない距離に制限する。
-        // 張り出しは「この原因が実際に持つ」ラベル/小骨で評価する
-        // (カテゴリ最大値だと必要以上に短くなる)
+        // 小骨長は同階層で統一済み (info.subLenLong) — 実際の描画に
+        // 使われる値と同じ基準で評価する (この原因自身の孫骨有無/
+        // ラベル幅は個別に反映する)
         const m = info.causeMetrics[i] || {};
         const cosS = Math.cos((p.subcauseAngleDeg * Math.PI) / 180);
         const ownTipExtras = Math.max(
-          ((m.numSub || 0) > 0 ? (m.subLen || 0) * cosS : 0)
+          ((m.numSub || 0) > 0 ? info.subLenLong * cosS : 0)
             + (m.hasDetails ? p.detailLength + (m.maxDetailLabel || 0) + 16 : 0),
           (m.causeLabelW || 60) + 12,
         ) + p.innerSafeMargin;
@@ -663,7 +687,7 @@ class IshikawaDiagram {
       const startY = attachY;
 
       // 小骨レイアウト (side 情報と背骨 Y を伝搬)
-      const causeMetric = info.causeMetrics[i] || {};
+      // 小骨長は「同じ層の親骨」の原則により図全体で統一済み (info.subLenLong)
       const subInfos = this.computeSubcauseGeometry(
         cause,
         {
@@ -673,7 +697,7 @@ class IshikawaDiagram {
           direction,
           spineY,
           spineX: info.spineX,
-          subLen: causeMetric.subLen || info.subLenLong,
+          subLen: info.subLenLong,
         },
         subRad, sinS, cosS,
       );
