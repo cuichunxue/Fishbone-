@@ -873,6 +873,197 @@ const DATASETS = {
     cause "又短い"
       subcause "ここも長めの小骨ラベルにしておく"
         detail "短"`,
+
+  // ==== 実務テーマ多様性検証セット (37-46) ====
+  // グローバル統一ルール (同じ層の親骨は最大の子骨数で長さを揃える) が
+  // 「一部の重い要因が全体を間延びさせないか」を様々な業種で確認する。
+
+  '37-healthcare': `ishikawa
+  effect "院内感染発生率上昇"
+  category "人"
+    cause "手指衛生遵守率低下"
+      subcause "多忙による省略"
+      subcause "手順の周知不足"
+    cause "新人教育不足"
+  category "設備"
+    cause "個室隔離不足"
+      subcause "病床数不足"
+    cause "換気設備老朽化"
+  category "手順"
+    cause "標準予防策の形骸化"
+      subcause "チェックリスト未使用"
+        detail "監査頻度低い"
+    cause "面会者管理不備"
+  category "環境"
+    cause "清掃頻度不足"
+    cause "共有物品の消毒漏れ"
+      subcause "消毒液補充遅延"`,
+
+  '38-retail-varlabel': `ishikawa
+  effect "客単価低下"
+  category "接客"
+    cause "声かけ"
+    cause "提案"
+    cause "レジ待ち時間が長時間化しクレームに繋がっている問題"
+  category "商品"
+    cause "品揃え"
+    cause "陳列"
+  category "価格"
+    cause "割引多い"
+    cause "競合安い"
+  category "販促"
+    cause "POP少"
+    cause "SNS未活用"`,
+
+  '39-logistics': `ishikawa
+  effect "配送遅延件数増加"
+  category "車両"
+    cause "老朽化による故障"
+      subcause "定期点検未実施"
+    cause "台数不足"
+  category "ドライバー"
+    cause "人手不足"
+      subcause "採用難"
+      subcause "離職率高い"
+    cause "経路不慣れ"
+  category "システム"
+    cause "配車最適化未導入"
+      subcause "手作業での割当"
+        detail "属人化している"
+    cause "リアルタイム追跡なし"
+  category "荷物"
+    cause "積載効率低い"
+    cause "再配達多発"
+      subcause "不在連絡見落とし"`,
+
+  '40-finance': `ishikawa
+  effect "決済エラー率上昇"
+  category "システム"
+    cause "API タイムアウト"
+      subcause "外部連携先の遅延"
+    cause "旧システムとの二重管理"
+  category "運用"
+    cause "リリース手順の属人化"
+    cause "監視アラート閾値不適切"
+  category "データ"
+    cause "顧客情報の不整合"
+      subcause "重複登録"
+        detail "名寄せ未実施"
+    cause "口座情報の更新遅延"
+  category "外部要因"
+    cause "決済代行会社の障害"`,
+
+  '41-education': `ishikawa
+  effect "退学率上昇"
+  category "学生"
+    cause "経済的困窮"
+    cause "学習意欲低下"
+      subcause "目標不明確"
+  category "教員"
+    cause "個別対応の時間不足"
+    cause "相談窓口の認知度低い"
+  category "カリキュラム"
+    cause "難易度のギャップ"
+      subcause "基礎科目とのつながり弱い"
+    cause "実務との関連性薄い"
+  category "環境"
+    cause "通学負担大きい"
+    cause "友人関係の孤立"
+      subcause "サークル参加率低い"`,
+
+  '42-agriculture': `ishikawa
+  effect "収穫量が計画を下回る"
+  category "気象"
+    cause "日照不足"
+    cause "台風被害"
+  category "土壌"
+    cause "連作障害"
+      subcause "土壌診断未実施"
+    cause "排水不良"
+  category "栽培管理"
+    cause "施肥タイミングのズレ"
+      subcause "経験則に依存"
+        detail "記録が残っていない"
+    cause "病害虫の発見遅れ"
+      subcause "見回り頻度不足"
+  category "労働力"
+    cause "高齢化による作業遅延"
+    cause "収穫期の人手不足"`,
+
+  '43-hospitality': `ishikawa
+  effect "宿泊客満足度スコア低下"
+  category "フロント"
+    cause "チェックイン待ち時間"
+      subcause "繁忙期の人員不足"
+    cause "多言語対応不足"
+  category "客室"
+    cause "清掃品質のバラツキ"
+      subcause "チェック体制形骸化"
+    cause "設備の経年劣化"
+  category "レストラン"
+    cause "混雑時の提供遅延"
+    cause "メニューの魅力不足"
+      subcause "季節性反映されず"
+  category "予約"
+    cause "OTA と自社サイトの在庫不整合"
+      subcause "手動更新に依存"
+        detail "更新頻度が1日1回のみ"`,
+
+  '44-devops-recurrence': `ishikawa
+  effect "本番障害が再発している"
+  category "原因分析"
+    cause "根本原因の特定が浅い"
+      subcause "5 why が徹底されない"
+    cause "類似障害の横展開なし"
+  category "再発防止"
+    cause "対策がドキュメント止まり"
+      subcause "自動テスト化されない"
+        detail "工数確保できない"
+    cause "オーナー不在の対策"
+  category "組織"
+    cause "ポストモーテム文化未成熟"
+      subcause "責任追及になりがち"
+    cause "ナレッジ共有の場がない"`,
+
+  // 極端なラベル分散: 1 つだけ非常に長いラベルを持つ原因を混ぜ、
+  // グローバル統一ルールで「短いラベルの原因まで間延びしないか」を検証
+  '45-outlier-label': `ishikawa
+  effect "極端ラベル分散テスト"
+  category "A"
+    cause "短"
+    cause "中くらいの長さの原因名がここに入ります"
+    cause "極めて長い原因名でありこれは意図的に全体の中骨長を試すために作られた長文ラベルです"
+  category "B"
+    cause "短2"
+    cause "短3"
+  category "C"
+    cause "短4"
+    cause "短5"
+  category "D"
+    cause "短6"
+    cause "短7"`,
+
+  // 極端な子骨数分散: 1 つだけ小骨が非常に多い原因を混ぜ、
+  // グローバル統一ルールで「小骨0本の原因まで中骨が伸びすぎないか」を検証
+  '46-outlier-subcount': `ishikawa
+  effect "極端子骨数分散テスト"
+  category "A"
+    cause "裸1"
+    cause "裸2"
+    cause "多数小骨"
+      subcause "s1"
+      subcause "s2"
+      subcause "s3"
+      subcause "s4"
+  category "B"
+    cause "裸3"
+    cause "裸4"
+  category "C"
+    cause "裸5"
+    cause "裸6"
+  category "D"
+    cause "裸7"
+    cause "裸8"`,
 };
 
 async function runChecks(page) {

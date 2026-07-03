@@ -317,10 +317,18 @@ class IshikawaDiagram {
     //    これにより階層ごとに骨の長さが揃い、子が少ない骨だけが不釣り合いに
     //    間延びする「スカスカ」を防ぎつつ、全体で一貫した見た目になる
     //    (大骨長 globalL は既にこの方式で統一済み — 中骨・小骨も同じ考え方)。
+    //
+    // 注意: 統一の基準は「子骨数」であって「親骨自身のラベル幅」ではない。
+    // causeLabelW (原因自身のラベル幅) を混ぜると、1 つだけ極端に長い
+    // ラベルの原因が図全体の中骨長を間延びさせてしまう
+    // (子骨が少ない他の原因まで無駄に長い骨になる = 別種のスカスカ)。
+    // ラベルが骨より長い場合は単に骨の先端からラベルがはみ出して描画される
+    // だけで正しく表示されるため、ラベル幅はキャンバスサイズ計算
+    // (beyondAttachHorizontal 等) にのみ使い、骨の長さ自体には使わない。
     const allCauseMetrics = categoryBasics.flatMap(c => c.causeMetrics);
     const globalCauseLength = Math.max(
       p.causeBaseLength,
-      ...allCauseMetrics.map(m => Math.max(m.causeLabelW, m.subSpread, m.maxSubLabel + 40))
+      ...allCauseMetrics.map(m => Math.max(m.subSpread, m.maxSubLabel + 40))
     );
     const globalSubLen = Math.max(
       p.subcauseLength,
