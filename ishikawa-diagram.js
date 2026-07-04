@@ -110,6 +110,10 @@ class IshikawaDiagram {
       // カテゴリボックスまで最低限これだけの絶対距離 (px) を確保する
       // (小骨・重要マーク楕円がボックスに接触しないようにする安全弁)
       pairBoxClearance: 150,
+      // pairTs (中骨ペアの位置) 計算時のみに使う内側クリアランスの緩和係数
+      // (大骨長 L のサイジングには使わない、緩和なしの値を使う。詳細は
+      // globalInnerNeedByPairIndexForTs のコメント参照)
+      innerNeedRelax: 0.94,
       // 片側配置 (フォールバック) 用 t 範囲
       singleTMin: 0.18,
       singleTMax: 0.84,
@@ -585,8 +589,17 @@ class IshikawaDiagram {
     // 全カテゴリで共有する pairTs (1 組だけ計算)。numPairs が maxNumPairs
     // より少ないカテゴリは先頭から必要な分だけ使う (背骨に近い側から
     // 詰まっているため、少ないペア数でも背骨側の位置が揃う)。
+    // 大骨長 L 自体は上の安全な (未緩和の) 必要量で決めるが、実際の
+    // pairTs は innerNeedRelax で少し緩和した必要量を使って計算する。
+    // こうすると各ペア間の間隔 (tStep = verticalNeed/(sinA*L)) は L が
+    // 変わらないため保たれたまま、背骨最寄りのペアだけをさらに
+    // 背骨側へ詰められる (L も一緒に緩めると tStep 自体が変わり、
+    // ペア間隔まで崩れてしまうため分離している)。
+    const globalInnerNeedByPairIndexForTs = globalInnerNeedByPairIndex.map(
+      need => need * p.innerNeedRelax
+    );
     const globalPairTs = maxNumPairs > 0
-      ? this.computePairPackedT(maxNumPairs, globalL, globalVerticalNeed, globalInnerNeedByPairIndex, sinA, cosA)
+      ? this.computePairPackedT(maxNumPairs, globalL, globalVerticalNeed, globalInnerNeedByPairIndexForTs, sinA, cosA)
       : [];
 
     // 各カテゴリに統一 L を適用し、派生量を計算
