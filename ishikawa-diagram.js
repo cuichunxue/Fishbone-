@@ -99,8 +99,11 @@ class IshikawaDiagram {
       // 模範図では中骨が大骨の全長に分散するため範囲を広げる。
       // 内側 (右) 中骨は +stagger で背骨から離れた位置に付くので、
       // 低い t でも横方向の余地を確保できる。
+      // pairTMin はカテゴリごとに最適化される (下記 optimizePairTMin 参照)。
+      // ここでの値は探索範囲の目安・フォールバック用。
       pairTMin: 0.36,
       pairTMax: 0.86,
+      pairTMinSearchRange: [0.28, 0.68],
       // 片側配置 (フォールバック) 用 t 範囲
       singleTMin: 0.18,
       singleTMax: 0.84,
@@ -409,46 +412,57 @@ class IshikawaDiagram {
         outerNeed + innerNeed + 36 + causeLabelExtraH,
       );
 
-      // 両側配置: ペア間隔 (縦) + 内側中骨が最低限の長さを確保できる条件
-      const pairTRange = p.pairTMax - p.pairTMin;
-      const requiredMajorByVerticalBoth = numPairs <= 1
-        ? 0
-        : verticalNeedBetweenCauses * (numPairs - 1) / (sinA * pairTRange);
-      // 内側中骨はフル長を要求しない (実行時に安全長へ自動キャップされる)。
-      // ただし骨が短すぎると不格好なため、最低 90px + 先端の張り出しが
-      // 確保できる大骨長を要求する。
-      // 張り出しは「実際に内側 (奇数番目) に配置される原因」だけで評価する
-      // — 最重量の原因は外側 (偶数番目) にあることが多く、
-      //   カテゴリ全体の最大値で計算すると大骨が無駄に長くなる。
-      // 小骨長は同階層で統一済み (subLenLong) なので、実際に描画される
-      // 外側小骨の水平投影も subLenLong を基準に評価する (per-cause の
-      // m.subLen ではなく統一値を使う — 幾何計算との整合性のため)
+      // 両側配置に必要な大骨長には相反する 2 つの要求がある:
+      //   (a) 内側 (奇数番目) 原因の先端張り出しを確保する要求
+      //       → pairTMin を大きく (背骨から離す) するほど楽になる
+      //   (b) ペア間の縦方向間隔を確保する要求
+      //       → pairTMin を小さくして pairTRange を広げるほど楽になる
+      // 固定の pairTMin を使うと、ペア数が少ないカテゴリは (a) が
+      // 支配的になり大骨が無駄に伸び (スカスカの原因)、ペア数が多い
+      // カテゴリでは逆に (b) が支配的になり破綻する。
+      // → カテゴリごとに両者が釣り合う最適な pairTMin をグリッド
+      //   サーチし、大骨長を最小化する (子が少ない骨まで間延びしない)。
       const tipExtrasOf = m => Math.max(
         (m.numSub > 0 ? subLenLong * cosS : 0)
           + (m.hasDetails ? p.detailLength + m.maxDetailLabel + 16 : 0),
         m.causeLabelW + 12,
       );
-      // 内側 (右) の各原因を「実際の取り付け位置 (pairTs[k] + stagger)」で評価。
-      // その原因自身の小骨に必要な骨長 (subMinLen) と先端張り出しの両方が
-      // 背骨までの水平距離に収まる大骨長を要求する。
-      // これにより、実行時キャップで短縮された内側骨の小骨ラベルが
-      // 詰まりすぎて重なる問題を防ぐ。収まらない重量級データは
-      // 閾値超過で片側モードへ自然にフォールバックする。
-      const pairTsPreview = this.computeEvenT(numPairs, p.pairTMin, p.pairTMax);
-      let requiredMajorByInner = 0;
+      // 内側 (右) 原因ごとの必要長 (ペア k 番目に属する)
+      const innerNeedByPairIndex = []; // k -> required ownLen+tipExtras+margin
       causeMetrics.forEach((m, i) => {
         if (i % 2 !== 1) return;
         const k = Math.floor(i / 2);
-        const tPos = (pairTsPreview[k] ?? p.pairTMax) + p.pairStaggerT;
         const ownLen = Math.max(90, m.numSub > 0 ? m.subMinLen + 20 : 0);
-        const req = (ownLen + tipExtrasOf(m) + p.innerSafeMargin) / (cosA * tPos);
-        requiredMajorByInner = Math.max(requiredMajorByInner, req);
+        const need = ownLen + tipExtrasOf(m) + p.innerSafeMargin;
+        innerNeedByPairIndex[k] = Math.max(innerNeedByPairIndex[k] || 0, need);
       });
-      const majorByBothSides = Math.max(
-        440,
-        requiredMajorByVerticalBoth,
-        requiredMajorByInner,
-      );
+
+      const evalMajorForPairTMin = (tMin) => {
+        const pairTRange = p.pairTMax - tMin;
+        const requiredVertical = numPairs <= 1
+          ? 0
+          : verticalNeedBetweenCauses * (numPairs - 1) / (sinA * pairTRange);
+        const pairTs = this.computeEvenT(numPairs, tMin, p.pairTMax);
+        let requiredInner = 0;
+        innerNeedByPairIndex.forEach((need, k) => {
+          const tPos = (pairTs[k] ?? p.pairTMax) + p.pairStaggerT;
+          requiredInner = Math.max(requiredInner, need / (cosA * tPos));
+        });
+        return Math.max(440, requiredVertical, requiredInner);
+      };
+
+      const [searchMin, searchMax] = p.pairTMinSearchRange;
+      const searchSteps = 24;
+      let bestPairTMin = p.pairTMin;
+      let majorByBothSides = Infinity;
+      for (let s = 0; s <= searchSteps; s++) {
+        const candidate = searchMin + (searchMax - searchMin) * (s / searchSteps);
+        const required = evalMajorForPairTMin(candidate);
+        if (required < majorByBothSides) {
+          majorByBothSides = required;
+          bestPairTMin = candidate;
+        }
+      }
 
       // 片側配置 (フォールバック): すべての中骨が外側に伸びる
       const singleTRange = p.singleTMax - p.singleTMin;
@@ -475,6 +489,7 @@ class IshikawaDiagram {
         subLenLong,
         majorByBothSides,
         majorBySingleSide,
+        pairTMinUsed: bestPairTMin,
         // 以降は最終 globalL 決定後に再計算
         majorBoneLength: 0,
         majorHorizontal: 0,
@@ -665,7 +680,8 @@ class IshikawaDiagram {
 
     if (info.layoutMode === 'pair') {
       const numPairs = info.numPairs;
-      const pairTs = this.computeEvenT(numPairs, p.pairTMin, p.pairTMax);
+      // pairTMin はカテゴリごとに最適化済み (info.pairTMinUsed) — スカスカ防止
+      const pairTs = this.computeEvenT(numPairs, info.pairTMinUsed, p.pairTMax);
       // ペアの左右を大骨上で少しずらす: 同一点に 2 つの矢先が刺さると衝突するため
       // (参考画像でも左右の中骨は少し段違いに描かれる)
       // 内側 (right) を +δ にすると背骨からの距離が増え、内側キャップにも有利
