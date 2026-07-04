@@ -468,35 +468,10 @@ class IshikawaDiagram {
         }
       }
 
-      // 最後のペアが pairTMax を超えず、かつカテゴリボックスまでの
-      // 絶対距離 (px) が pairBoxClearance 以上になる最小の大骨長 L を
-      // 二分探索する (両条件とも L が大きいほど満たしやすくなるため単調)。
-      // 後者が無いと、大骨長が小さい軽量カテゴリでペアが pairTMax
-      // いっぱいまで詰まった際、そこに付く小骨・重要マーク楕円が
-      // カテゴリボックスに接触することがある。
-      const lastPairT = (L) => {
-        const ts = this.computePairPackedT(numPairs, L, verticalNeedBetweenCauses, innerNeedByPairIndex, sinA, cosA);
-        return ts[ts.length - 1] ?? 0;
-      };
-      const feasibleL = (L) => {
-        const t = lastPairT(L);
-        if (t > p.pairTMax) return false;
-        return (1 - t) * L >= p.pairBoxClearance;
-      };
-      let lo = 1;
-      let hi = 440;
-      while (!feasibleL(hi) && hi < 1e7) {
-        hi *= 2;
-      }
-      for (let iter = 0; iter < 60; iter++) {
-        const mid = (lo + hi) / 2;
-        if (feasibleL(mid)) {
-          hi = mid;
-        } else {
-          lo = mid;
-        }
-      }
-      const majorByBothSides = Math.max(440, hi);
+      // 大骨長・pairTs (t 位置) は図全体で統一するため、ここでは各カテゴリの
+      // 必要量 (innerNeedByPairIndex/verticalNeedBetweenCauses) を算出する
+      // だけに留め、実際の L と pairTs の決定は全カテゴリ収集後に行う
+      // (下記「図全体で統一するペア位置」参照)。
 
       // 片側配置 (フォールバック): すべての中骨が外側に伸びる
       const singleTRange = p.singleTMax - p.singleTMin;
@@ -521,7 +496,6 @@ class IshikawaDiagram {
         causeLength,
         causeMetrics,
         subLenLong,
-        majorByBothSides,
         majorBySingleSide,
         verticalNeedBetweenCauses,
         innerNeedByPairIndex,
@@ -548,7 +522,7 @@ class IshikawaDiagram {
       };
     });
 
-    // ---- 図全体で統一するモードと大骨長を決定 ----
+    // ---- 図全体で統一するモードと大骨長・ペア位置を決定 ----
     // 特性要因図の基本ルール: 中骨は大骨の両側に配置する。
     // データがどれだけ密でも (キャンバスが大きくなっても) この原則を優先し、
     // 片側配置へのフォールバックは行わない。
@@ -558,15 +532,69 @@ class IshikawaDiagram {
     categoryInfos.forEach(c => {
       c.layoutMode = c.numCauses >= 2 ? 'pair' : 'single';
     });
-    const globalL = Math.max(440, ...categoryInfos.map(c =>
-      c.layoutMode === 'pair' ? c.majorByBothSides : c.majorBySingleSide
+
+    // pairTs (各ペアの t 位置) も大骨長と同じ「同じ層は図全体で統一」の
+    // 原則を適用する。カテゴリごとに個別計算すると、内容量の違いで
+    // カテゴリ間の中骨配置バランスがバラついて見えるため (例: あるカテゴリは
+    // 背骨近くに詰まり、別のカテゴリは中間まで間延びする)、pair k 番目の
+    // 必要量は全カテゴリの最大値を取り、pairTs は 1 組だけ計算して
+    // 全カテゴリで共有する。
+    const pairCats = categoryInfos.filter(c => c.layoutMode === 'pair');
+    const maxNumPairs = pairCats.length ? Math.max(...pairCats.map(c => c.numPairs)) : 0;
+    const globalVerticalNeed = pairCats.length
+      ? Math.max(...pairCats.map(c => c.verticalNeedBetweenCauses))
+      : 0;
+    const globalInnerNeedByPairIndex = [];
+    for (let k = 0; k < maxNumPairs; k++) {
+      globalInnerNeedByPairIndex[k] = Math.max(
+        0, ...pairCats.map(c => c.innerNeedByPairIndex[k] || 0)
+      );
+    }
+    // 最後のペアが pairTMax を超えず、かつカテゴリボックスまでの絶対距離
+    // (px) が pairBoxClearance 以上になる最小の大骨長を二分探索する
+    // (両条件とも L が大きいほど満たしやすくなるため単調)。
+    const lastPairT = (L) => {
+      const ts = this.computePairPackedT(maxNumPairs, L, globalVerticalNeed, globalInnerNeedByPairIndex, sinA, cosA);
+      return ts[ts.length - 1] ?? 0;
+    };
+    const feasibleL = (L) => {
+      if (maxNumPairs === 0) return true;
+      const t = lastPairT(L);
+      if (t > p.pairTMax) return false;
+      return (1 - t) * L >= p.pairBoxClearance;
+    };
+    let loL = 1;
+    let hiL = 440;
+    while (!feasibleL(hiL) && hiL < 1e7) {
+      hiL *= 2;
+    }
+    for (let iter = 0; iter < 60; iter++) {
+      const mid = (loL + hiL) / 2;
+      if (feasibleL(mid)) {
+        hiL = mid;
+      } else {
+        loL = mid;
+      }
+    }
+    const globalPairRequiredL = maxNumPairs > 0 ? Math.max(440, hiL) : 0;
+
+    const globalL = Math.max(440, globalPairRequiredL, ...categoryInfos.map(c =>
+      c.layoutMode === 'single' ? c.majorBySingleSide : 0
     ));
+
+    // 全カテゴリで共有する pairTs (1 組だけ計算)。numPairs が maxNumPairs
+    // より少ないカテゴリは先頭から必要な分だけ使う (背骨に近い側から
+    // 詰まっているため、少ないペア数でも背骨側の位置が揃う)。
+    const globalPairTs = maxNumPairs > 0
+      ? this.computePairPackedT(maxNumPairs, globalL, globalVerticalNeed, globalInnerNeedByPairIndex, sinA, cosA)
+      : [];
 
     // 各カテゴリに統一 L を適用し、派生量を計算
     // ペア配置では右側 (内側) 中骨が pairTMax + pairStaggerT まで進むため、
     // extents はスタガー分を含めて計算する
     categoryInfos.forEach(info => {
       info.majorBoneLength = globalL;
+      info.globalPairTs = globalPairTs;
       const tMaxForExtents = (info.layoutMode === 'pair')
         ? p.pairTMax + p.pairStaggerT : p.singleTMax;
       info.farthestCauseY = globalL * sinA * tMaxForExtents;
@@ -720,10 +748,9 @@ class IshikawaDiagram {
       // 同じペア (i, i+1) は同じ t (± stagger) を共有し、大骨の高さ順に
       // 並べると必ず L,R,L,R,... の交互サイクルになる。
       const numPairs = info.numPairs;
-      const pairTs = this.computePairPackedT(
-        numPairs, info.majorBoneLength, info.verticalNeedBetweenCauses,
-        info.innerNeedByPairIndex, sinA, cosA,
-      );
+      // pairTs は図全体で共有 (背骨に近い側から詰まっているため、
+      // 先頭から numPairs 個を使えばこのカテゴリでも背骨側の位置が揃う)
+      const pairTs = info.globalPairTs.slice(0, numPairs);
       causePlacements = info.category.causes.map((_, i) => {
         const side = info.sideOfIndex[i];
         const k = info.pairSlotOfIndex[i];
