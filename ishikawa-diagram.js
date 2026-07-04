@@ -96,24 +96,16 @@ class IshikawaDiagram {
       subcauseAngleDeg: 60,        // 小骨の傾き = 大骨と平行 (教科書ルール)
 
       // ペア配置 (両側) 用 t 範囲
-      // 模範図では中骨が大骨の全長に分散するため範囲を広げる。
-      // 内側 (右) 中骨は +stagger で背骨から離れた位置に付くので、
-      // 低い t でも横方向の余地を確保できる。
-      // pairTMin はカテゴリごとに最適化される (下記 optimizePairTMin 参照)。
-      // ここでの値は探索範囲の目安・フォールバック用。
-      pairTMin: 0.36,
+      // 中骨は「大骨の付け根 (背骨側) から必要な分だけ」順に詰めて配置する
+      // (親骨側 = 大骨の起点から展開するイメージ)。pairTAnchor は最初の
+      // ペアが取り得る最小 t (背骨に最も近い位置)。そこから先は
+      // 実際に必要な間隔 (verticalNeedBetweenCauses / 内側クリアランス)
+      // の分だけ t を進める — 均等配置 (computeEvenT) だと不要に
+      // pairTMax まで広げてしまい、原因数が奇数/少数のカテゴリで
+      // 中間に大きな空白ができる (スカスカの原因) ため、
+      // 必要最小限の間隔で詰めるモデルに変更。
+      pairTAnchor: 0.16,
       pairTMax: 0.86,
-      // 探索上限を 0.46 に制限する理由:
-      // ペア数が多いカテゴリ (3ペア以上) の自然な最適点は 0.40 前後に
-      // あるため、この上限では影響を受けない。
-      // 一方ペア数が少ないカテゴリ (2ペア) は制約なしで最適化すると
-      // 0.59 前後まで pairTMin が押し上げられ、大骨長は最小化されるが
-      // 背骨付近が中骨・小骨のない完全な空白域になってしまう
-      // (要求大骨長 required(t) は t=0.59 付近まで単調減少するため、
-      //  ペナルティ項では実用的な範囲でこの動きを止められなかった)。
-      // 上限を 0.46 に制限することで、背骨付近の充填を優先しつつ
-      // カテゴリごとの最適化 (多ペア時の緩和) は維持する。
-      pairTMinSearchRange: [0.16, 0.30],
       // 片側配置 (フォールバック) 用 t 範囲
       singleTMin: 0.18,
       singleTMax: 0.84,
@@ -447,32 +439,26 @@ class IshikawaDiagram {
         innerNeedByPairIndex[k] = Math.max(innerNeedByPairIndex[k] || 0, need);
       });
 
-      const evalMajorForPairTMin = (tMin) => {
-        const tRange = p.pairTMax - tMin;
-        const requiredVertical = numPairs <= 1
-          ? 0
-          : verticalNeedBetweenCauses * (numPairs - 1) / (sinA * tRange);
-        const pairTs = this.computeEvenT(numPairs, tMin, p.pairTMax);
-        let requiredInner = 0;
-        innerNeedByPairIndex.forEach((need, k) => {
-          const tPos = (pairTs[k] ?? p.pairTMax) + p.pairStaggerT;
-          requiredInner = Math.max(requiredInner, need / (cosA * tPos));
-        });
-        return Math.max(440, requiredVertical, requiredInner);
+      // 最後のペアが pairTMax を超えない最小の大骨長 L を二分探索
+      // (L が大きいほど同じ物理間隔に必要な t は縮むため、判定は L に対して単調)
+      const lastPairT = (L) => {
+        const ts = this.computePairPackedT(numPairs, L, verticalNeedBetweenCauses, innerNeedByPairIndex, sinA, cosA);
+        return ts[ts.length - 1] ?? 0;
       };
-
-      const [searchMin, searchMax] = p.pairTMinSearchRange;
-      const searchSteps = 24;
-      let bestPairTMin = p.pairTMin;
-      let majorByBothSides = Infinity;
-      for (let s = 0; s <= searchSteps; s++) {
-        const candidate = searchMin + (searchMax - searchMin) * (s / searchSteps);
-        const required = evalMajorForPairTMin(candidate);
-        if (required < majorByBothSides) {
-          majorByBothSides = required;
-          bestPairTMin = candidate;
+      let lo = 1;
+      let hi = 440;
+      while (lastPairT(hi) > p.pairTMax && hi < 1e7) {
+        hi *= 2;
+      }
+      for (let iter = 0; iter < 60; iter++) {
+        const mid = (lo + hi) / 2;
+        if (lastPairT(mid) <= p.pairTMax) {
+          hi = mid;
+        } else {
+          lo = mid;
         }
       }
+      const majorByBothSides = Math.max(440, hi);
 
       // 片側配置 (フォールバック): すべての中骨が外側に伸びる
       const singleTRange = p.singleTMax - p.singleTMin;
@@ -499,7 +485,8 @@ class IshikawaDiagram {
         subLenLong,
         majorByBothSides,
         majorBySingleSide,
-        pairTMinUsed: bestPairTMin,
+        verticalNeedBetweenCauses,
+        innerNeedByPairIndex,
         // 以降は最終 globalL 決定後に再計算
         majorBoneLength: 0,
         majorHorizontal: 0,
@@ -693,7 +680,10 @@ class IshikawaDiagram {
       // 同じペア (i, i+1) は同じ t (± stagger) を共有し、大骨の高さ順に
       // 並べると必ず L,R,L,R,... の交互サイクルになる。
       const numPairs = info.numPairs;
-      const pairTs = this.computeEvenT(numPairs, info.pairTMinUsed, p.pairTMax);
+      const pairTs = this.computePairPackedT(
+        numPairs, info.majorBoneLength, info.verticalNeedBetweenCauses,
+        info.innerNeedByPairIndex, sinA, cosA,
+      );
       causePlacements = info.category.causes.map((_, i) => ({
         t: pairTs[Math.floor(i / 2)]
           + ((i % 2 === 0) ? -p.pairStaggerT : +p.pairStaggerT),
@@ -1026,6 +1016,25 @@ class IshikawaDiagram {
     }
     if (current) lines.push(current);
     return lines.length ? lines : [''];
+  }
+
+  /**
+   * ペア配置の各ペアの t 位置を、大骨の背骨側 (pairTAnchor) から
+   * 実際に必要な間隔分だけ詰めて計算する (親骨の起点側から展開)。
+   * L (大骨長) が大きいほど同じ物理間隔に必要な t は縮む。
+   */
+  computePairPackedT(numPairs, L, verticalNeed, innerNeedByPairIndex, sinA, cosA) {
+    const p = this.params;
+    if (numPairs <= 0) return [];
+    const tStep = numPairs > 1 ? verticalNeed / (sinA * L) : 0;
+    const ts = [];
+    for (let k = 0; k < numPairs; k++) {
+      const need = innerNeedByPairIndex[k] || 0;
+      const minT = need > 0 ? Math.max(0, need / (cosA * L) - p.pairStaggerT) : 0;
+      const base = k === 0 ? p.pairTAnchor : ts[k - 1] + tStep;
+      ts.push(Math.max(base, minT));
+    }
+    return ts;
   }
 
   /**
