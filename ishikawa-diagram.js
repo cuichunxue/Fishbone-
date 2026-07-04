@@ -106,6 +106,10 @@ class IshikawaDiagram {
       // 必要最小限の間隔で詰めるモデルに変更。
       pairTAnchor: 0.16,
       pairTMax: 0.86,
+      // 大骨長 L が小さい図で、ペアが pairTMax まで詰まっても
+      // カテゴリボックスまで最低限これだけの絶対距離 (px) を確保する
+      // (小骨・重要マーク楕円がボックスに接触しないようにする安全弁)
+      pairBoxClearance: 150,
       // 片側配置 (フォールバック) 用 t 範囲
       singleTMin: 0.18,
       singleTMax: 0.84,
@@ -439,20 +443,29 @@ class IshikawaDiagram {
         innerNeedByPairIndex[k] = Math.max(innerNeedByPairIndex[k] || 0, need);
       });
 
-      // 最後のペアが pairTMax を超えない最小の大骨長 L を二分探索
-      // (L が大きいほど同じ物理間隔に必要な t は縮むため、判定は L に対して単調)
+      // 最後のペアが pairTMax を超えず、かつカテゴリボックスまでの
+      // 絶対距離 (px) が pairBoxClearance 以上になる最小の大骨長 L を
+      // 二分探索する (両条件とも L が大きいほど満たしやすくなるため単調)。
+      // 後者が無いと、大骨長が小さい軽量カテゴリでペアが pairTMax
+      // いっぱいまで詰まった際、そこに付く小骨・重要マーク楕円が
+      // カテゴリボックスに接触することがある。
       const lastPairT = (L) => {
         const ts = this.computePairPackedT(numPairs, L, verticalNeedBetweenCauses, innerNeedByPairIndex, sinA, cosA);
         return ts[ts.length - 1] ?? 0;
       };
+      const feasibleL = (L) => {
+        const t = lastPairT(L);
+        if (t > p.pairTMax) return false;
+        return (1 - t) * L >= p.pairBoxClearance;
+      };
       let lo = 1;
       let hi = 440;
-      while (lastPairT(hi) > p.pairTMax && hi < 1e7) {
+      while (!feasibleL(hi) && hi < 1e7) {
         hi *= 2;
       }
       for (let iter = 0; iter < 60; iter++) {
         const mid = (lo + hi) / 2;
-        if (lastPairT(mid) <= p.pairTMax) {
+        if (feasibleL(mid)) {
           hi = mid;
         } else {
           lo = mid;
@@ -702,6 +715,7 @@ class IshikawaDiagram {
       // 大骨上の attach 座標
       const attachX = info.spineX - info.majorBoneLength * cosA * t;
       const attachY = spineY + sign * info.majorBoneLength * sinA * t;
+      const causeM = info.causeMetrics[i] || {};
 
       // 中骨方向と長さ
       // side='left'  : 外側 (-x), 長さは causeLength
@@ -717,7 +731,7 @@ class IshikawaDiagram {
         // 小骨長は同階層で統一済み (info.subLenLong) — 実際の描画に
         // 使われる値と同じ基準で評価する (この原因自身の孫骨有無/
         // ラベル幅は個別に反映する)
-        const m = info.causeMetrics[i] || {};
+        const m = causeM;
         const cosS = Math.cos((p.subcauseAngleDeg * Math.PI) / 180);
         const ownTipExtras = Math.max(
           ((m.numSub || 0) > 0 ? info.subLenLong * cosS : 0)
@@ -747,6 +761,7 @@ class IshikawaDiagram {
           spineX: info.spineX,
           subLen: info.subLenLong,
           causeSide: side,
+          maxSubLabel: causeM.maxSubLabel || 0,
           // 孫骨の交互展開の安全判定 (大骨との交差チェック) に使う
           boneStartX: info.spineX,
           boneStartY: spineY,
@@ -781,7 +796,17 @@ class IshikawaDiagram {
     const subs = cause.subcauses;
     if (!subs.length) return [];
 
-    const ts = this.computeEvenT(subs.length, p.subcauseTMin, p.subcauseTMax);
+    // 小骨は「中骨の付け根 (大骨側 = 親の親に近い側)」の subcauseTMax から
+    // 実際に必要な間隔だけ詰めて展開する (親骨の起点側から展開)。
+    // 子が少ないカテゴリでは大骨側にまとまり、多い原因だけが先端側へ
+    // 伸びるため、図全体で統一した中骨長 (info.causeLength) を使っても
+    // 不要な空白が生まれない。stepPx は「同じ側 (上/下) の隣接小骨」が
+    // 重ならない間隔 (ラベル幅+マージン) の半分 (2 ステップで 1 間隔分)。
+    const labelSafeSpacing = (ctx.maxSubLabel || 0) + 24;
+    const stepPx = labelSafeSpacing / 2;
+    const ts = this.computeAnchoredPackedT(
+      subs.length, p.subcauseTMax, stepPx, ctx.causeLen, -1, p.subcauseTMin,
+    );
     const horizontalDir = ctx.direction;
     // 内側小骨が背骨にぶつからないよう、最大長を概算
     // 中骨の Y 座標 (cause line Y) と背骨 Y の距離 = |attachY - spineY|
@@ -798,9 +823,8 @@ class IshikawaDiagram {
     // 誤って考慮すると安全距離が半分になり反転がほぼ常に禁止されてしまう。
     // 孫骨を反転展開する際、同じ側の次の小骨の陣地まで届かないよう
     // この値の一部を安全な反転距離の上限として使う。
-    const stepT = subs.length > 1 ? (p.subcauseTMax - p.subcauseTMin) / (subs.length - 1) : 0;
     const sameSideStepX = subs.length > 2
-      ? Math.abs(ctx.attachX - ctx.startX) * stepT * 2
+      ? Math.abs(ts[2] - ts[0]) * Math.abs(ctx.attachX - ctx.startX)
       : Infinity; // 同じ側の隣が存在しない (2本以下) → 制約なし
     const maxSafeFlipReach = sameSideStepX * 0.46;
 
@@ -883,7 +907,23 @@ class IshikawaDiagram {
     const p = this.params;
     if (!sub.details.length) return [];
 
-    const ts = this.computeEvenT(sub.details.length, p.detailTMin, p.detailTMax);
+    // 孫骨は「小骨の付け根 (中骨側 = 親の親に近い側)」の detailTMin から
+    // 実際に必要な間隔だけ詰めて展開する (親骨の起点側から展開)。
+    // 詳細が少ない小骨は付け根付近にまとまり、多い小骨だけが先端側へ
+    // 伸びるため、図全体で統一した小骨長 (info.subLenLong) でも
+    // 不要な空白が生まれない。孫骨は基本的に同一方向へ並ぶ (allowAlternate
+    // が有効な場合のみ隣が反転) ため、隣接間隔はラベル幅そのものを使う
+    // (小骨側の「同じ側 (2本毎)」の緩和は適用しない)。
+    const detailLabelMs = sub.details.map(d =>
+      this.wrappedLabelMetrics(
+        typeof d === 'string' ? d : d.name, p.fontPx.detail, p.labelWrapWidth.detail));
+    const maxDetailLabelHere = detailLabelMs.length
+      ? Math.max(...detailLabelMs.map(m => m.width))
+      : 0;
+    const stepPx = maxDetailLabelHere + p.detailLabelGap * 2 + 14;
+    const ts = this.computeAnchoredPackedT(
+      sub.details.length, p.detailTMin, stepPx, ctx.subLen, +1, p.detailTMax,
+    );
     const parentDir = ctx.horizontalDir;
     const hasBoneRef = ctx.boneStartX !== undefined && ctx.boneEndX !== undefined;
 
@@ -1035,6 +1075,34 @@ class IshikawaDiagram {
       ts.push(Math.max(base, minT));
     }
     return ts;
+  }
+
+  /**
+   * 汎用: 親骨上で子骨を「親の親に近い側 (anchorT)」から実際に必要な
+   * 物理間隔 (stepPx) の分だけ順に詰めて配置する。子が少なければ
+   * anchorT 付近にまとまり、子が多いほど dirSign 方向へ伸びる —
+   * 均等配置 (computeEvenT) のように常に全域へ間延びさせない。
+   * tBound を渡した場合、自然な (詰めた) 配置が tBound を超えるときは
+   * 全体を均等スケールし、最後の点がちょうど tBound に収まるようにする
+   * (単純な per-step クランプだと複数点が同じ tBound 値に重なって
+   *  ラベルが完全一致・重複してしまうため、必ず不等間隔を保つ)。
+   * 十分な余地がない極端なケースでは、結果的に旧来の均等配置と同じになる。
+   */
+  computeAnchoredPackedT(n, anchorT, stepPx, parentLenPx, dirSign, tBound) {
+    if (n <= 0) return [];
+    if (n === 1) return [anchorT];
+    const tStep = parentLenPx > 0 ? stepPx / parentLenPx : 0;
+    const ts = [anchorT];
+    for (let k = 1; k < n; k++) {
+      ts.push(ts[k - 1] + dirSign * tStep);
+    }
+    if (tBound === undefined) return ts;
+    const last = ts[n - 1];
+    const overshoot = dirSign < 0 ? (tBound - last) : (last - tBound);
+    if (overshoot <= 0) return ts;
+    const span = last - anchorT; // 同じ符号 (dirSign) を持つ
+    const scale = span !== 0 ? (tBound - anchorT) / span : 0;
+    return ts.map(t => anchorT + (t - anchorT) * scale);
   }
 
   /**
