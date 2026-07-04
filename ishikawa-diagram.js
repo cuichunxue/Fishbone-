@@ -488,13 +488,19 @@ class IshikawaDiagram {
       // 左側 (外側) は確定した大骨長の下で、縦間隔さえ確保できれば
       // 制約なく背骨に寄せてよい。単一モードの下限 (singleTMin) まで
       // 詰めることを許容する。
+      // 「縦間隔を満たすための上限」は pairTMax - requiredLeftTRange であり、
+      // tMinLeft は「背骨に近いほど良い」ので、その上限と singleTMin の
+      // 小さい方 (=より背骨に近い方) を採用する。
+      // (以前は Math.max を使っており、逆に背骨から遠ざける計算に
+      //  なっていたバグがあった)
       let bestPairTMinLeft;
       if (numLeft <= 1) {
         bestPairTMinLeft = p.singleTMin;
       } else {
         const requiredLeftTRange =
           verticalNeedBetweenCauses * (numLeft - 1) / (sinA * majorByBothSides);
-        bestPairTMinLeft = Math.max(p.singleTMin, p.pairTMax - requiredLeftTRange);
+        const maxAllowedTMinLeft = p.pairTMax - requiredLeftTRange;
+        bestPairTMinLeft = Math.max(0.05, Math.min(p.singleTMin, maxAllowedTMinLeft));
       }
 
       // 片側配置 (フォールバック): すべての中骨が外側に伸びる
