@@ -117,7 +117,6 @@ class IshikawaDiagram {
       subcauseStaggerRatio: 0.68,       // 内側小骨 (孫骨なし) の追加短縮比率
       detailLength: 56,
       lengthBandPx: 16,             // 中骨・小骨長を丸める量子化単位
-      majorUnifyTolerance: 0.18,    // 上下同列カテゴリの大骨長統一しきい値
       branchUnifyTolerance: 0.15,   // カテゴリ内の中骨長/小骨長バンド統一しきい値
       maxLengthBandsPerCategory: 3, // カテゴリ内で許容する長さバンド数
 
@@ -484,24 +483,16 @@ class IshikawaDiagram {
       ) * p.baseUnit;
     });
 
-    // ==== Phase 4: 上下同列カテゴリの大骨長を 18% 許容で統一 ====
-    // 完全な幾何学的統一より視覚密度の均衡を優先する。差が大きいときは
-    // 個別長を採用し、複雑なカテゴリが単純なカテゴリを間延びさせない。
-    const columnPairCount = Math.ceil(categoryInfos.length / 2);
-    for (let k = 0; k < columnPairCount; k++) {
-      const top = categoryInfos.find(c => c.idx === 2 * k && c.isTop);
-      const bot = categoryInfos.find(c => c.idx === 2 * k + 1 && !c.isTop);
-      if (top && bot) {
-        const a = top.majorRequiredLength, b = bot.majorRequiredLength;
-        const diffRatio = Math.abs(a - b) / Math.max(a, b);
-        const unified = diffRatio <= p.majorUnifyTolerance ? Math.max(a, b) : null;
-        top.majorBoneLength = unified ?? a;
-        bot.majorBoneLength = unified ?? b;
-      } else {
-        if (top) top.majorBoneLength = top.majorRequiredLength;
-        if (bot) bot.majorBoneLength = bot.majorRequiredLength;
-      }
-    }
+    // ==== Phase 4: 大骨長を図全体で統一 ====
+    // すべての大骨を最大必要長へ揃える → 大骨先端 (カテゴリボックス) の
+    // 位置がカテゴリ間で揃い、視覚バランスが取れる。
+    // 中骨の位置は「背骨からの実距離」で決まっており大骨長に比例しない
+    // ため、大骨を伸ばしても中骨・小骨の内容は背骨側へ詰まったままで
+    // 間延びしない — 伸びるのは中身のない骨の先端部分だけであり、
+    // 旧方式 (t 比率) のように内容ごと引き伸ばされる問題は起きない。
+    const globalMajorLen = Math.max(
+      ...categoryInfos.map(c => c.majorRequiredLength));
+    categoryInfos.forEach(c => { c.majorBoneLength = globalMajorLen; });
 
     // ==== Phase 5: キャンバスサイズに必要な縦横張り出しを算出 ====
     categoryInfos.forEach(info => {
@@ -570,6 +561,7 @@ class IshikawaDiagram {
     // (idx=2k を上、idx=2k+1 を下) を同じ列として扱い、同じ spineX を
     // 共有させることで上下対称・左右整列の教科書レイアウトを実現する。
     // 列間隔もカテゴリ数や文字量が少なければ広げすぎない。
+    const columnPairCount = Math.ceil(categoryInfos.length / 2);
     const columns = [];
     for (let k = 0; k < columnPairCount; k++) {
       const top = categoryInfos.find(c => c.idx === 2 * k && c.isTop);
