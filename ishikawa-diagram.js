@@ -8,17 +8,20 @@
  *    ペアの左右は大骨上で少し段違いにして矢印の衝突を防ぐ (参考図と同じ)。
  *  - 小骨: 大骨と平行 (同じ 60°)。中骨の上下に交互配置し、矢先は中骨へ。
  *  - 孫骨: 水平 (中骨と平行)。小骨ライン上に分岐し、矢先は小骨へ。
- *  - 線の太さは階層で単調減少 (背骨 5 > 大骨 3.5 > 中骨 2.2 > 小骨 1.5 > 孫骨 1)。
+ *  - 線の太さは階層で単調減少 (背骨 6.0 > 大骨 4.2 > 中骨 2.6 > 小骨 1.8 > 孫骨 1.2)。
  *
- * 自動レイアウトのルール:
- *  - 完全データ駆動: 描画前に全座標を計算し、どんなデータでも重ならない
- *    キャンバスサイズと配置を決める (テキスト幅も推定して反映)。
- *  - 親骨の長さは子骨のペア数 (ceil(N/2)) に応じて段階的に伸縮。
- *  - 大骨長は全カテゴリで統一 → 大骨先端の Y がそろい、バランスが取れる。
- *  - モード (両側ペア/片側) は図全体で統一。全カテゴリが両側配置の
- *    閾値に収まる場合のみペア、それ以外は片側にフォールバック。
- *  - 背骨は常にキャンバスの上下中央。最低アスペクト比 1.15 を保証。
- *  - 内側 (背骨側) へ伸びる中骨・小骨は背骨に届かない長さに自動キャップ。
+ * 空間・距離最適化レイアウト (2024 最終仕様):
+ *  同じ階層の骨をすべて同じ長さにする方式は廃止した。統一対象は
+ *  「骨の絶対長」ではなく、以下の視覚規則へ変更している。
+ *   - 骨の角度 / 8px 単位の距離リズム / 子骨間の近接ルール
+ *   - 背骨から最初の中骨までの距離 (大骨長に比例させず実距離 px で管理)
+ *   - 骨長は内容量から個別算出し、カテゴリ内で長さバンド (最大3種、
+ *     15% 許容) へゆるく統一する。図全体には無条件統一しない。
+ *   - 上下同列カテゴリの大骨長は、必要長差が 18% 以内のときのみ統一する。
+ *  子骨は「親の親に近い側 (背骨側/付け根側)」を起点に、実際に必要な
+ *  物理間隔だけを詰めて配置する (t 比率による均等配置・比例縮小は
+ *  行わない)。これにより、単純な入力は引き締まった図に、複雑な入力は
+ *  必要な箇所だけが自然に拡張される。詳細は DIAGRAM_RULES.md を参照。
  */
 class IshikawaDiagram {
   constructor(containerId) {
@@ -89,63 +92,42 @@ class IshikawaDiagram {
     ];
 
     // 主要パラメータ（必要に応じてレイアウト計算で上書き）
-    // 中骨は「ペア配置(両側)」を優先し、データ密度が高くて両側配置が
-    // キャンバスを巨大化させる場合のみ片側(全て外側)にフォールバック。
+    // 空間・距離最適化レイアウト仕様: 骨の絶対長ではなく、角度・距離リズム・
+    // 近接ルール・密度目標・長さバンドを図全体で共有する。子骨の位置は
+    // t 比率ではなく実距離 (px) で、親の親に近い側から必要な分だけ詰めて
+    // 配置する (DIAGRAM_RULES.md 参照)。
     this.params = {
       majorAngleDeg: 60,           // 大骨の傾き (教科書標準の 60°)
       subcauseAngleDeg: 60,        // 小骨の傾き = 大骨と平行 (教科書ルール)
 
-      // ペア配置 (両側) 用 t 範囲
-      // 中骨は「大骨の付け根 (背骨側) から必要な分だけ」順に詰めて配置する
-      // (親骨側 = 大骨の起点から展開するイメージ)。pairTAnchor は最初の
-      // ペアが取り得る最小 t (背骨に最も近い位置)。そこから先は
-      // 実際に必要な間隔 (verticalNeedBetweenCauses / 内側クリアランス)
-      // の分だけ t を進める — 均等配置 (computeEvenT) だと不要に
-      // pairTMax まで広げてしまい、原因数が奇数/少数のカテゴリで
-      // 中間に大きな空白ができる (スカスカの原因) ため、
-      // 必要最小限の間隔で詰めるモデルに変更。
-      pairTAnchor: 0.16,
-      pairTMax: 0.86,
-      // 大骨長 L が小さい図で、ペアが pairTMax まで詰まっても
-      // カテゴリボックスまで最低限これだけの絶対距離 (px) を確保する
-      // (小骨・重要マーク楕円がボックスに接触しないようにする安全弁)
-      pairBoxClearance: 150,
-      // pairTs (中骨ペアの位置) 計算時のみに使う内側クリアランスの緩和係数
-      // (大骨長 L のサイジングには使わない、緩和なしの値を使う。詳細は
-      // globalInnerNeedByPairIndexForTs のコメント参照)
-      innerNeedRelax: 0.94,
-      // 片側配置 (フォールバック) 用 t 範囲
-      singleTMin: 0.18,
-      singleTMax: 0.84,
+      // ---- 距離体系 (8px 基本単位のリズム) ----
+      baseUnit: 8,
+      preferredFirstCauseGap: 48,   // 背骨→最初の中骨ペアの基準距離 (実距離 px)
+      minimumFirstCauseGap: 40,     // 同、下限
+      pairGapMin: 56,               // 隣接ペア間の最小 along-bone 間隔
+      pairStaggerPx: 24,            // ペアの左右段差 (px)。内側を先端寄りに
+      firstSubcauseGap: 48,         // 中骨の付け根→最初の小骨の基準距離
+      subStagger: 32,               // 隣り合う反対側 (上/下) 小骨の段差
+      firstDetailGap: 32,           // 小骨の付け根→最初の孫骨の基準距離
+      columnGapPreferred: 64,       // カテゴリ列間の基準間隔
 
-      subcauseTMin: 0.18,
-      subcauseTMax: 0.84,
-      subcauseStaggerRatio: 0.68,
-      detailTMin: 0.30,
-      detailTMax: 0.76,
-
-      causeSpacingAlongBone: 96,
-      subcauseSpacingAlongCause: 80,
-
-      // 親骨の長さは "展開される子骨の本数" の 2 本ごとに段階的に伸ばす
-      //   length = base + max(0, ceil(N/2) - 1) * stepPerPair
-      causeBaseLength: 180,
-      causeLengthPerPair: 80,           // 中骨: 小骨ペアごとの追加長
-      subcauseLength: 108,
-      subcauseLengthPerPair: 30,        // 小骨: 孫骨ペアごとの追加長
-      subcauseLengthWithDetails: 132,   // 互換用 (使用していない箇所のフォールバック)
+      // ---- 骨長 (内容量から個別算出し、カテゴリ内でバンド統一) ----
+      causeBaseLength: 168,
+      subcauseBaseLength: 104,
+      subcauseStaggerRatio: 0.68,       // 内側小骨 (孫骨なし) の追加短縮比率
       detailLength: 56,
+      lengthBandPx: 16,             // 中骨・小骨長を丸める量子化単位
+      majorUnifyTolerance: 0.18,    // 上下同列カテゴリの大骨長統一しきい値
+      branchUnifyTolerance: 0.15,   // カテゴリ内の中骨長/小骨長バンド統一しきい値
+      maxLengthBandsPerCategory: 3, // カテゴリ内で許容する長さバンド数
+
       categoryBoxWidth: 140,
       categoryBoxHeight: 48,
-      categoryGap: 90,
       effectGap: 18,               // 背骨矢先は特性ボックスに接する (教科書ルール)
-      pairStaggerT: 0.08,          // ペアの左右段差: 右(内側)を先端寄りに (模範図の描き方 + 内側の横余地確保)
-      effectBoxMaxHeight: 360,
-      spineEndPadding: 110,
-      innerSafeMargin: 26,
+      innerSafeMargin: 24,
+      categoryEndClearanceMin: 112, // 最後の中骨〜カテゴリボックスの最小余白
       // 最小描画範囲 (空きカテゴリでも視覚を保つ)
       minCanvasHeight: 520,
-      minCanvasWidth: 900,
 
       // 相対可読性: 専用ソフト並みにキャンバスに対して文字を大きく
       fontPx: {
@@ -155,8 +137,10 @@ class IshikawaDiagram {
         subcause: 13,
         detail: 12,
       },
-      sideMarginX: 70,
-      verticalMargin: 56,
+      horizontalMargin: 48,
+      verticalMargin: 40,
+      maxAspectPadding: 96,         // アスペクト比補正で追加してよい余白の上限 (px)
+      maxAspectPaddingRatio: 0.06,  // 同、キャンバス幅に対する比率上限
       causeLabelGap: 18,
       subcauseLabelGap: 12,
       detailLabelGap: 6,
@@ -249,425 +233,345 @@ class IshikawaDiagram {
     const cosS = Math.cos(subRad);
     const sinS = Math.sin(subRad);
 
-    const numCategories = Math.max(1, data.categories.length);
-    const numTop = Math.ceil(numCategories / 2);
-    const numBottom = Math.floor(numCategories / 2);
-
-    // 1) 各カテゴリ・各原因の「必要な長さ」の材料 (causeMetrics) を計算
-    //    (この段階ではまだ長さを確定しない — 全体最大値を後で求めるため)
-    const tSubRange = p.subcauseTMax - p.subcauseTMin;
-    const categoryBasics = data.categories.map((cat, idx) => {
+    // ==== Phase 1: 各中骨の内容量メトリクスと「自身の」必要長を計算 ====
+    // 図全体で骨長を無条件に統一せず、各中骨・小骨は自分の子要素の量から
+    // 個別に必要長を求める (空間・距離最適化レイアウト仕様 9 節)。
+    const categoryInfos = data.categories.map((cat, idx) => {
       const isTop = idx % 2 === 0;
-      const numCauses = Math.max(1, cat.causes.length);
-      const numPairs = Math.ceil(numCauses / 2);
-
-      // カテゴリ名も長文なら折返し、ボックス自体を拡幅・拡高する
-      // (固定幅のままだと長いカテゴリ名がボックスからはみ出しキャンバス外で
-      // 切れてしまうため、cause/subcause/detail と同じ折返しルールを適用)
       const catLabelM = this.wrappedLabelMetrics(
         cat.name, p.fontPx.category, p.labelWrapWidth.category);
-      const categoryBoxWidth = Math.max(p.categoryBoxWidth, catLabelM.width + 28);
+      const categoryBoxWidth = Math.max(p.categoryBoxWidth, catLabelM.width + 32);
       const categoryBoxHeight = Math.max(
         p.categoryBoxHeight,
         catLabelM.lineCount * (p.fontPx.category + 6) + 20
       );
 
-      const causeMetrics = cat.causes.map(cause => {
-        // ラベルは labelWrapWidth を超えると 2 行に折り返される前提で幅を推定
+      const causeContents = cat.causes.map(cause => {
         const causeLabelM = this.wrappedLabelMetrics(
           cause.name, p.fontPx.cause, p.labelWrapWidth.cause);
         const causeLabelW = causeLabelM.width + 20;
-        const causeLabelLines = causeLabelM.lineCount;
         const numSub = cause.subcauses.length;
 
         const subLabelMs = cause.subcauses.map(s =>
           this.wrappedLabelMetrics(s.name, p.fontPx.subcause, p.labelWrapWidth.subcause));
-        const maxSubLabel = numSub > 0
-          ? Math.max(...subLabelMs.map(m => m.width))
-          : 0;
-        const maxSubLabelLines = numSub > 0
-          ? Math.max(...subLabelMs.map(m => m.lineCount))
-          : 1;
+        const maxSubLabel = numSub > 0 ? Math.max(...subLabelMs.map(m => m.width)) : 0;
+        const maxSubLabelLines = numSub > 0 ? Math.max(...subLabelMs.map(m => m.lineCount)) : 1;
 
-        // 小骨は上下交互配置なので同じ側 (UP/DOWN それぞれ) の隣接小骨は
-        // index 差 2 で並ぶ。よって X 間隔は 2*tStep として算出する。
-        const labelSafeSpacing = maxSubLabel + 24;
-        const subLayoutLen = numSub >= 2
-          ? labelSafeSpacing * (numSub - 1) / (2 * tSubRange)
-          : (numSub === 1 ? 140 : 0);
-
-        // 中骨長: base + ceil(numSub/2 - 1) * stepPerPair (展開ペアごとの伸縮)
-        const subPairs = Math.ceil(numSub / 2);
-        const causeLenByPair = p.causeBaseLength
-          + Math.max(0, subPairs - 1) * p.causeLengthPerPair;
-        const subSpread = numSub > 0
-          ? Math.max(subLayoutLen, causeLenByPair)
-          : 0;
-
-        // 小骨長: base + ceil(numDetails/2 - 1) * stepPerPair (孫骨ペアごと)
-        // カテゴリ内最大の小骨長を採用
-        const subLensPerSub = cause.subcauses.map(s => {
-          const dPairs = Math.ceil(s.details.length / 2);
-          return p.subcauseLength
-            + Math.max(0, dPairs - 1) * p.subcauseLengthPerPair;
-        });
-        const subLen = subLensPerSub.length
-          ? Math.max(p.subcauseLength, ...subLensPerSub)
-          : p.subcauseLength;
         const hasDetails = cause.subcauses.some(s => s.details.length > 0);
-
         const detailLabelMs = cause.subcauses.flatMap(s =>
-          s.details.map(d =>
-            this.wrappedLabelMetrics(
-              typeof d === 'string' ? d : d.name,
-              p.fontPx.detail, p.labelWrapWidth.detail)));
-        const maxDetailLabel = detailLabelMs.length > 0
+          s.details.map(d => this.wrappedLabelMetrics(
+            typeof d === 'string' ? d : d.name, p.fontPx.detail, p.labelWrapWidth.detail)));
+        const maxDetailLabel = detailLabelMs.length
           ? Math.max(0, ...detailLabelMs.map(m => m.width))
           : 0;
 
+        // この中骨「自身」の小骨長 (図全体には統一しない)。
+        // 孫骨を絶対距離 (firstDetailGap 起点 + ラベル幅ベースの間隔) で
+        // 配置するのに必要な長さを実測ベースで見込む (9.3 節)。
+        // detailTipClear は小骨の自由端 (小骨ラベルの位置) との干渉を
+        // 避けるための終端余白。
+        const detailTipClear = 32;
+        const subLensPerSub = cause.subcauses.map(s => {
+          const n = s.details.length;
+          if (n === 0) return p.subcauseBaseLength;
+          const dLabelMs = s.details.map(d => this.wrappedLabelMetrics(
+            typeof d === 'string' ? d : d.name, p.fontPx.detail, p.labelWrapWidth.detail));
+          const dMaxLabel = Math.max(...dLabelMs.map(m => m.width));
+          const dStep = dMaxLabel + p.detailLabelGap * 2 + 14;
+          const detailSpan = p.firstDetailGap + (n - 1) * dStep + detailTipClear;
+          return Math.max(p.subcauseBaseLength, detailSpan);
+        });
+        const subOwnLen = subLensPerSub.length
+          ? Math.max(p.subcauseBaseLength, ...subLensPerSub)
+          : p.subcauseBaseLength;
+
+        // この中骨「自身」の必要長: 小骨を絶対距離で配置するのに必要な
+        // 長さ (firstSubcauseGap 起点、上下交互のインターリーブ配置 +
+        // 中骨先端の余白 subTipClear) と、小骨/孫骨連鎖の水平張り出し、
+        // 中骨自身のラベル幅のうち最大値。subTipClear は中骨の自由端
+        // (中骨ラベルの位置) と最後の小骨の干渉を避けるための終端余白。
+        // 小骨は上下交互のため、ラベル幅の安全間隔が必要なのは
+        // 「同じ側 (2本毎)」の小骨同士のみ — 隣り合う反対側の小骨は
+        // 小さなスタガーで足りる (computeInterleavedDistances)。
+        const subTipClear = 40;
+        const subDs = this.computeInterleavedDistances(
+          numSub, p.firstSubcauseGap, maxSubLabel + 24, p.subStagger);
+        const subSpanPx = numSub > 0
+          ? subDs[numSub - 1] + subTipClear
+          : 0;
+        const causeOwnLen = Math.max(
+          p.causeBaseLength,
+          subSpanPx + subOwnLen * cosS + (hasDetails ? p.detailLength + maxDetailLabel + 16 : 0),
+          causeLabelW + 40,
+        );
+
         return {
-          causeLabelW, causeLabelLines, subSpread, subMinLen: subLayoutLen,
-          maxSubLabel, maxSubLabelLines,
-          hasDetails, subLen, maxDetailLabel, numSub,
+          cause, causeLabelW, causeLabelLines: causeLabelM.lineCount,
+          numSub, maxSubLabel, maxSubLabelLines, hasDetails, maxDetailLabel,
+          subOwnLen, causeOwnLen, subSpanPx,
         };
       });
 
       return {
-        category: cat, idx, isTop, numCauses, numPairs, causeMetrics,
+        category: cat, idx, isTop, causeContents,
         categoryBoxWidth, categoryBoxHeight, catLabelLines: catLabelM.lines,
       };
     });
 
-    // 2) 「同じ層の親骨」の長さを図全体で統一する
-    //    中骨 (親=大骨、子=小骨の数) と 小骨 (親=中骨、子=孫骨の数) それぞれの
-    //    階層で、最も子骨数が多い (=最も長さを必要とする) ものを基準に
-    //    全ての同階層の親骨へ同じ長さを適用する。
-    //    これにより階層ごとに骨の長さが揃い、子が少ない骨だけが不釣り合いに
-    //    間延びする「スカスカ」を防ぎつつ、全体で一貫した見た目になる
-    //    (大骨長 globalL は既にこの方式で統一済み — 中骨・小骨も同じ考え方)。
-    //
-    // 注意: 統一の基準は「子骨数」であって「親骨自身のラベル幅」ではない。
-    // causeLabelW (原因自身のラベル幅) を混ぜると、1 つだけ極端に長い
-    // ラベルの原因が図全体の中骨長を間延びさせてしまう
-    // (子骨が少ない他の原因まで無駄に長い骨になる = 別種のスカスカ)。
-    // ラベルが骨より長い場合は単に骨の先端からラベルがはみ出して描画される
-    // だけで正しく表示されるため、ラベル幅はキャンバスサイズ計算
-    // (beyondAttachHorizontal 等) にのみ使い、骨の長さ自体には使わない。
-    const allCauseMetrics = categoryBasics.flatMap(c => c.causeMetrics);
-    const globalCauseLength = Math.max(
-      p.causeBaseLength,
-      ...allCauseMetrics.map(m => Math.max(m.subSpread, m.maxSubLabel + 40))
-    );
-    const globalSubLen = Math.max(
-      p.subcauseLength,
-      ...allCauseMetrics.map(m => m.subLen)
-    );
-
-    // 3) 統一された長さを使い、各カテゴリの派生量を計算
-    const categoryInfos = categoryBasics.map(basic => {
-      const {
-        category: cat, idx, isTop, numCauses, numPairs, causeMetrics,
-        categoryBoxWidth, categoryBoxHeight, catLabelLines,
-      } = basic;
-      const causeLength = globalCauseLength;
-      const subLenLong = globalSubLen;
-      const hasAnySubcauses = cat.causes.some(c => c.subcauses.length > 0);
-      const hasAnyDetails = cat.causes.some(c => c.subcauses.some(s => s.details.length > 0));
-
-      const maxSubLabelGlobal = Math.max(0, ...causeMetrics.map(m => m.maxSubLabel));
-      const maxDetailLabelGlobal = Math.max(0, ...causeMetrics.map(m => m.maxDetailLabel));
-      const maxCauseLabelW = Math.max(0, ...causeMetrics.map(m => m.causeLabelW));
-      const maxCauseLabelLines = Math.max(1, ...causeMetrics.map(m => m.causeLabelLines));
-      const maxSubLabelLines = Math.max(1, ...causeMetrics.map(m => m.maxSubLabelLines || 1));
-
-      // 折返しによる追加行の高さ
-      const causeLabelExtraH = (maxCauseLabelLines - 1) * (p.fontPx.cause + 3);
-      const subLabelExtraH = (maxSubLabelLines - 1) * (p.fontPx.subcause + 3);
-
-      // 小骨の垂直占有 (小骨が無いカテゴリは 0)
-      const subVertical = hasAnySubcauses
-        ? subLenLong * sinS + p.subcauseLabelGap + 18 + subLabelExtraH
-        : 0;
-
-      // 水平方向の張り出し (実データに応じて)
-      const subHorizontalOuter = hasAnySubcauses ? subLenLong * cosS : 0;
-      const detailHorizontalOuter = hasAnyDetails
-        ? p.detailLength + maxDetailLabelGlobal + 16
-        : 0;
-
-      // 中骨の attach 点から先 (free end 方向) の最大水平張り出し:
-      //   経路 1: 中骨本体 + 先端の中骨ラベル
-      //   経路 2: 小骨 attach (t=subcauseTMax) + 小骨水平投影 + 孫骨連鎖
-      // 従来は「中骨本体 + 小骨連鎖」で計算しており、
-      //   - ラベルの張り出しが漏れる (長文で不足)
-      //   - 小骨連鎖を骨の先端起点として過大評価
-      // の両方を修正
-      const beyondAttachHorizontal = Math.max(
-        causeLength + maxCauseLabelW + 12,
-        causeLength * p.subcauseTMax + subHorizontalOuter + detailHorizontalOuter,
-      );
-
-      // === 大骨長を 2 通り計算して、両側 / 片側を選択 ===
-      // 縦間隔: 隣接する中骨の間には
-      //   「手前の中骨の外側小骨」+「奥の中骨の内側小骨」が入る。
-      //   外側小骨は小骨 1 本以上、内側小骨は小骨 2 本以上で初めて使われる。
-      //   実データの使用状況に応じて必要分だけ確保する (スカスカ防止)。
-      const anyOuterSub = cat.causes.some(c => c.subcauses.length >= 1);
-      const anyInnerSub = cat.causes.some(c => c.subcauses.length >= 2);
-      const sideNeed = subLenLong * sinS + subLabelExtraH + p.subcauseLabelGap;
-      const outerNeed = anyOuterSub ? sideNeed : 0;
-      const innerNeed = anyInnerSub ? sideNeed : 0;
-      const verticalNeedBetweenCauses = Math.max(
-        55,
-        outerNeed + innerNeed + 22 + causeLabelExtraH,
-      );
-
-      // 両側配置: 中骨は「同じ親骨 (大骨) 上で左右交互のサイクル」で
-      // 展開する (再帰ルール: 斜め骨の子は左右交互)。
-      // このため左右は同じ t 配列を共有するペア単位で配置し、
-      // 大骨に沿った見た目の順序が必ず L,R,L,R,... と交互になるように
-      // する (左右を別々の t 範囲に分離すると、大骨上の実際の高さ順が
-      // L,R,R,L のように崩れて交互サイクルに見えなくなるため)。
-      const tipExtrasOf = m => Math.max(
-        (m.numSub > 0 ? subLenLong * cosS : 0)
-          + (m.hasDetails ? p.detailLength + m.maxDetailLabel + 16 : 0),
-        m.causeLabelW + 12,
-      );
-      // 内側 (背骨側) 原因の必要長。ownLen は「最低限これだけあれば
-      // 小骨ラベルが破綻しない」目安であり、実行時キャップ
-      // (causeLen = max(80, min(causeLength, maxInner))) が別途安全弁
-      // として働くため、ここでは緩めの係数をかけて大骨長の過大な
-      // 事前確保を避ける (スカスカ防止)。
-      const innerNeedOf = m => {
-        const ownLen = Math.max(70, m.numSub > 0 ? m.subMinLen * 0.92 : 0);
-        return ownLen + tipExtrasOf(m) + p.innerSafeMargin;
-      };
-      // どの原因をどのペア・どちら側にするかは、内容量 (内側にしたときの
-      // 必要長) の昇順で決める。L,R,L,R... という交互サイクルは大骨上の
-      // "位置" の順序であり、その位置をどの原因が占めるかは自由に選べる。
-      // 軽い原因同士を背骨に一番近いペアにまとめ、ペア内では軽い方を
-      // 内側にすることで、たまたま隣接する原因が両方重い場合でも
-      // 背骨付近のペアだけは軽く保たれ、大骨全体が不必要に間延びしない
-      // (重い原因は背骨から遠い — 元々余地の大きいペアに割り当てられる)。
-      const orderByNeed = causeMetrics
-        .map((m, i) => ({ i, need: innerNeedOf(m) }))
-        .sort((a, b) => a.need - b.need)
-        .map(o => o.i);
-
-      const sideOfIndex = [];
-      const pairSlotOfIndex = [];
-      const innerNeedByPairIndex = [];
-      for (let k = 0; k < numPairs; k++) {
-        const a = orderByNeed[2 * k];
-        const b = orderByNeed[2 * k + 1];
-        pairSlotOfIndex[a] = k;
-        if (b !== undefined) {
-          pairSlotOfIndex[b] = k;
-          // orderByNeed は昇順なので a の方が必要長が小さい (= 内側向き)
-          sideOfIndex[a] = 'right';
-          sideOfIndex[b] = 'left';
-          innerNeedByPairIndex[k] = innerNeedOf(causeMetrics[a]);
-        } else {
-          sideOfIndex[a] = 'left'; // 相方のいない単独中骨は常に外側
-        }
-      }
-
-      // 大骨長・pairTs (t 位置) は図全体で統一するため、ここでは各カテゴリの
-      // 必要量 (innerNeedByPairIndex/verticalNeedBetweenCauses) を算出する
-      // だけに留め、実際の L と pairTs の決定は全カテゴリ収集後に行う
-      // (下記「図全体で統一するペア位置」参照)。
-
-      // 片側配置 (フォールバック): すべての中骨が外側に伸びる
-      const singleTRange = p.singleTMax - p.singleTMin;
-      const requiredMajorByVerticalSingle = numCauses <= 1
-        ? 0
-        : verticalNeedBetweenCauses * (numCauses - 1) / (sinA * singleTRange);
-      const requiredMajorBySpacingSingle = numCauses <= 1
-        ? 0
-        : p.causeSpacingAlongBone * (numCauses - 1) / singleTRange;
-      const majorBySingleSide = Math.max(
-        420,
-        requiredMajorByVerticalSingle,
-        requiredMajorBySpacingSingle,
-      );
-
-      return {
-        category: cat,
-        idx,
-        isTop,
-        numCauses,
-        numPairs,
-        causeLength,
-        causeMetrics,
-        subLenLong,
-        majorBySingleSide,
-        verticalNeedBetweenCauses,
-        innerNeedByPairIndex,
-        sideOfIndex,
-        pairSlotOfIndex,
-        // 以降は最終 globalL 決定後に再計算
-        majorBoneLength: 0,
-        majorHorizontal: 0,
-        farthestCauseY: 0,
-        categoryVertical: 0,
-        horizontalExtentFromSpine: 0,
-        layoutMode: null,
-        subHorizontalOuter,
-        detailHorizontalOuter,
-        beyondAttachHorizontal,
-        subVertical,
-        maxDetailLabelGlobal,
-        maxCauseLabelW,
-        hasAnySubcauses,
-        hasAnyDetails,
-        categoryBoxWidth,
-        categoryBoxHeight,
-        catLabelLines,
-      };
-    });
-
-    // ---- 図全体で統一するモードと大骨長・ペア位置を決定 ----
-    // 特性要因図の基本ルール: 中骨は大骨の両側に配置する。
-    // データがどれだけ密でも (キャンバスが大きくなっても) この原則を優先し、
-    // 片側配置へのフォールバックは行わない。
-    // 中骨 1 本のカテゴリのみ、ペアを組む相手がいないため単側になる。
-    // 統一 L = 全カテゴリの必要 L の最大値
-    //   ⇒ 大骨先端 Y がカテゴリ間で揃い、視覚バランスが取れる
-    categoryInfos.forEach(c => {
-      c.layoutMode = c.numCauses >= 2 ? 'pair' : 'single';
-    });
-
-    // pairTs (各ペアの t 位置) も大骨長と同じ「同じ層は図全体で統一」の
-    // 原則を適用する。カテゴリごとに個別計算すると、内容量の違いで
-    // カテゴリ間の中骨配置バランスがバラついて見えるため (例: あるカテゴリは
-    // 背骨近くに詰まり、別のカテゴリは中間まで間延びする)、pair k 番目の
-    // 必要量は全カテゴリの最大値を取り、pairTs は 1 組だけ計算して
-    // 全カテゴリで共有する。
-    const pairCats = categoryInfos.filter(c => c.layoutMode === 'pair');
-    const maxNumPairs = pairCats.length ? Math.max(...pairCats.map(c => c.numPairs)) : 0;
-    const globalVerticalNeed = pairCats.length
-      ? Math.max(...pairCats.map(c => c.verticalNeedBetweenCauses))
-      : 0;
-    const globalInnerNeedByPairIndex = [];
-    for (let k = 0; k < maxNumPairs; k++) {
-      globalInnerNeedByPairIndex[k] = Math.max(
-        0, ...pairCats.map(c => c.innerNeedByPairIndex[k] || 0)
-      );
-    }
-    // 最後のペアが pairTMax を超えず、かつカテゴリボックスまでの絶対距離
-    // (px) が pairBoxClearance 以上になる最小の大骨長を二分探索する
-    // (両条件とも L が大きいほど満たしやすくなるため単調)。
-    const lastPairT = (L) => {
-      const ts = this.computePairPackedT(maxNumPairs, L, globalVerticalNeed, globalInnerNeedByPairIndex, sinA, cosA);
-      return ts[ts.length - 1] ?? 0;
-    };
-    const feasibleL = (L) => {
-      if (maxNumPairs === 0) return true;
-      const t = lastPairT(L);
-      if (t > p.pairTMax) return false;
-      return (1 - t) * L >= p.pairBoxClearance;
-    };
-    let loL = 1;
-    let hiL = 440;
-    while (!feasibleL(hiL) && hiL < 1e7) {
-      hiL *= 2;
-    }
-    for (let iter = 0; iter < 60; iter++) {
-      const mid = (loL + hiL) / 2;
-      if (feasibleL(mid)) {
-        hiL = mid;
-      } else {
-        loL = mid;
-      }
-    }
-    const globalPairRequiredL = maxNumPairs > 0 ? Math.max(440, hiL) : 0;
-
-    const globalL = Math.max(440, globalPairRequiredL, ...categoryInfos.map(c =>
-      c.layoutMode === 'single' ? c.majorBySingleSide : 0
-    ));
-
-    // 全カテゴリで共有する pairTs (1 組だけ計算)。numPairs が maxNumPairs
-    // より少ないカテゴリは先頭から必要な分だけ使う (背骨に近い側から
-    // 詰まっているため、少ないペア数でも背骨側の位置が揃う)。
-    // 大骨長 L 自体は上の安全な (未緩和の) 必要量で決めるが、実際の
-    // pairTs は innerNeedRelax で少し緩和した必要量を使って計算する。
-    // こうすると各ペア間の間隔 (tStep = verticalNeed/(sinA*L)) は L が
-    // 変わらないため保たれたまま、背骨最寄りのペアだけをさらに
-    // 背骨側へ詰められる (L も一緒に緩めると tStep 自体が変わり、
-    // ペア間隔まで崩れてしまうため分離している)。
-    const globalInnerNeedByPairIndexForTs = globalInnerNeedByPairIndex.map(
-      need => need * p.innerNeedRelax
-    );
-    const globalPairTs = maxNumPairs > 0
-      ? this.computePairPackedT(maxNumPairs, globalL, globalVerticalNeed, globalInnerNeedByPairIndexForTs, sinA, cosA)
-      : [];
-
-    // 各カテゴリに統一 L を適用し、派生量を計算
-    // ペア配置では右側 (内側) 中骨が pairTMax + pairStaggerT まで進むため、
-    // extents はスタガー分を含めて計算する
+    // ==== Phase 2: カテゴリ内で長さバンドへ統一 ====
+    // 完全にバラバラの長さにすると不揃いに見えるため、カテゴリ内で
+    // 16px 単位のバンドへ丸め、近い値 (15% 以内) 同士・最大3バンドまで
+    // 統一する (大きい方へ揃える)。図全体には統一しない。
     categoryInfos.forEach(info => {
-      info.majorBoneLength = globalL;
-      info.globalPairTs = globalPairTs;
-      const tMaxForExtents = (info.layoutMode === 'pair')
-        ? p.pairTMax + p.pairStaggerT : p.singleTMax;
-      info.farthestCauseY = globalL * sinA * tMaxForExtents;
-      // 縦張り出しは「最遠中骨 + 小骨」と「大骨先端 + カテゴリボックス」の大きい方
-      // (大骨先端は t=1.0 なので、大型キャンバスでは中骨最遠点より遠くなる)
-      // ボックスサイズはカテゴリ名の長さに応じて拡幅・拡高されるため、
-      // 固定値 p.categoryBoxHeight/Width ではなくカテゴリ毎の実サイズを使う
+      const causeLens = this.bandUnify(
+        info.causeContents.map(c => c.causeOwnLen),
+        p.lengthBandPx, p.branchUnifyTolerance, p.maxLengthBandsPerCategory, p.causeBaseLength,
+      );
+      const subLens = this.bandUnify(
+        info.causeContents.map(c => c.subOwnLen),
+        p.lengthBandPx, p.branchUnifyTolerance, p.maxLengthBandsPerCategory, p.subcauseBaseLength,
+      );
+      info.causeContents.forEach((c, i) => {
+        c.causeLength = causeLens[i];
+        c.subLen = subLens[i];
+      });
+    });
+
+    // ==== Phase 3: 中骨の絶対距離配置 (t 比率を使わない) ====
+    // 背骨から最初の中骨ペアまでは preferredFirstCauseGap (既定 48px) を
+    // 基準とし、大骨長に比例させない。以降のペアは、前後のペアが実際に
+    // 必要とする縦方向 envelope から距離を決める (固定間隔ではない)。
+    categoryInfos.forEach(info => {
+      const causeContents = info.causeContents;
+      const numCauses = Math.max(1, causeContents.length);
+      const numPairs = Math.ceil(numCauses / 2);
+      info.numCauses = numCauses;
+      info.numPairs = numPairs;
+      info.layoutMode = numCauses >= 2 ? 'pair' : 'single';
+
+      const effMargin = this.effectiveInnerSafeMargin();
+      const tipExtrasOf = c => Math.max(
+        (c.numSub > 0 ? c.subLen * cosS : 0) + (c.hasDetails ? p.detailLength + c.maxDetailLabel + 16 : 0),
+        c.causeLabelW + 12,
+      );
+      // 内側 (背骨側) に置いたときに必要な「背骨までの水平距離」。
+      // 骨本体分は「小骨の配置に必要な along-bone スパン」(subSpanPx) を
+      // 確保する — これを削ると実行時キャップで骨が縮み、小骨同士が
+      // 圧縮されて重なる (安全キャップは通常入力で発動 0 が目標: 12 節)。
+      const innerNeedOf = c => {
+        const ownLen = Math.max(70, c.numSub > 0 ? c.subSpanPx : 0);
+        return ownLen + tipExtrasOf(c) + effMargin;
+      };
+      // 小骨チェーンの縦方向 (y) 占有。away = 背骨から離れる側 (外側小骨、
+      // 小骨1本以上で発生)、toward = 背骨へ向かう側 (内側小骨、2本以上で発生)。
+      // ペア間ギャップ用は折返し追加行 + ラベル余白のみ (実証済みの旧式)。
+      const subLabelExtraOf = c =>
+        (c.maxSubLabelLines - 1) * (p.fontPx.subcause + 3) + p.subcauseLabelGap;
+      const awayFootOf = c => c.numSub >= 1 ? (c.subLen * sinS + subLabelExtraOf(c)) : 0;
+      const towardFootOf = c => c.numSub >= 2 ? (c.subLen * sinS + subLabelExtraOf(c)) : 0;
+      const causeLabelExtraHOf = c => (c.causeLabelLines - 1) * (p.fontPx.cause + 3);
+      // 内側小骨 (とそのラベル) が背骨に届かないために必要な
+      // 「中骨の背骨からの y 距離」→ attach 距離 (along-bone) への変換は /sinA。
+      // こちらはラベル 1 行目の高さ + アンカーオフセット (~14px) も含めて
+      // 完全に確保する (背骨との接触はハード制約のため)。
+      const towardSpineSafeDistOf = c => c.numSub >= 2
+        ? (c.subLen * sinS + subLabelExtraOf(c) + 14 + effMargin) / sinA
+        : 0;
+
+      if (info.layoutMode === 'pair') {
+        // 内容量 (内側配置時の必要長) 昇順に並べ、軽いペアを背骨側にまとめる。
+        // L,R,L,R... の交互サイクルは大骨上の「位置」の順序であり、
+        // その位置をどの原因が占めるかは自由に選べるため、これで崩れない。
+        const order = causeContents
+          .map((c, i) => ({ i, need: innerNeedOf(c) }))
+          .sort((a, b) => a.need - b.need)
+          .map(o => o.i);
+
+        const sideOfIndex = [];
+        const pairSlotOfIndex = [];
+        const pairInner = [];
+        const pairOuter = [];
+        for (let k = 0; k < numPairs; k++) {
+          const a = order[2 * k];
+          const b = order[2 * k + 1];
+          pairSlotOfIndex[a] = k;
+          if (b !== undefined) {
+            pairSlotOfIndex[b] = k;
+            sideOfIndex[a] = 'right'; sideOfIndex[b] = 'left';
+            pairInner[k] = a; pairOuter[k] = b;
+          } else {
+            sideOfIndex[a] = 'left';
+            pairOuter[k] = a;
+          }
+        }
+
+        const pairCausesOf = k => [pairOuter[k], pairInner[k]]
+          .filter(i => i !== undefined)
+          .map(i => causeContents[i]);
+
+        const pairCenters = [];
+        for (let k = 0; k < numPairs; k++) {
+          const causesHere = pairCausesOf(k);
+          let center;
+          if (k === 0) {
+            center = p.preferredFirstCauseGap;
+          } else {
+            // 隣接ペア間の必要 y 距離 = 手前ペアの away 側小骨
+            //   + 奥ペアの toward 側小骨 + ラベル分 → along-bone は /sinA
+            const prevAway = Math.max(...pairCausesOf(k - 1).map(awayFootOf), 0);
+            const thisToward = Math.max(...causesHere.map(towardFootOf), 0);
+            const labelExtra = Math.max(...causesHere.map(causeLabelExtraHOf), 0);
+            // +22 は中骨ラベル 1 行分 + 余白 (pairGapPadding 相当を含む)
+            const verticalNeed = prevAway + thisToward + 22 + labelExtra;
+            const gap = Math.max(p.pairGapMin, verticalNeed / sinA);
+            center = pairCenters[k - 1] + gap;
+          }
+          // 内側原因が背骨までの水平距離を確保できる along-bone 距離。
+          // 水平距離 = attachDist * cosA なので変換は /cosA
+          // (7.1 節: 安全を確保できない場合のみ既定 48px を超えることを許可)
+          if (pairInner[k] !== undefined) {
+            const requiredCenter =
+              innerNeedOf(causeContents[pairInner[k]]) / cosA - p.pairStaggerPx;
+            center = Math.max(center, requiredCenter);
+          }
+          // 内側小骨 (toward 側) が背骨に届かない along-bone 距離
+          center = Math.max(center, ...causesHere.map(towardSpineSafeDistOf));
+          center = Math.max(center, p.minimumFirstCauseGap);
+          if (k > 0) center = Math.max(center, pairCenters[k - 1] + p.pairGapMin);
+          pairCenters[k] = center;
+        }
+
+        // 8px の距離リズムへ丸める (切り上げで安全側)
+        info.sideOfIndex = sideOfIndex;
+        info.pairSlotOfIndex = pairSlotOfIndex;
+        info.pairCenters = pairCenters.map(c => Math.ceil(c / p.baseUnit) * p.baseUnit);
+        info.farthestAttachDist = info.pairCenters[numPairs - 1] + p.pairStaggerPx;
+        info.lastPairAwayFoot = Math.max(...pairCausesOf(numPairs - 1).map(awayFootOf), 0);
+        info.lastPairMaxSubLen = Math.max(
+          ...pairCausesOf(numPairs - 1).map(c => c.numSub > 0 ? c.subLen : 0), 0);
+      } else {
+        // 原因が1本のカテゴリ: 固定 t 範囲を使わず、背骨から
+        // preferredFirstCauseGap を基準に外側配置する (22 節)。
+        // 内側小骨が背骨に届く場合のみ、安全な距離まで移動する (12 節:
+        // 長さの強制短縮ではなく接続位置の移動で解決する)。
+        // 原因が 0 本 (空カテゴリ) でも骨とボックスは描画するため、
+        // 既定距離で安全にフォールバックする。
+        const c0 = causeContents[0];
+        const d = Math.max(
+          p.preferredFirstCauseGap,
+          c0 ? towardSpineSafeDistOf(c0) : 0,
+        );
+        info.sideOfIndex = ['left'];
+        info.pairSlotOfIndex = [0];
+        info.pairCenters = [Math.ceil(d / p.baseUnit) * p.baseUnit];
+        info.farthestAttachDist = info.pairCenters[0];
+        info.lastPairAwayFoot = c0 ? awayFootOf(c0) : 0;
+        info.lastPairMaxSubLen = c0 && c0.numSub > 0 ? c0.subLen : 0;
+      }
+
+      // ---- 大骨の必要長 ----
+      // 最後の中骨の attach 位置 + カテゴリ側終端余白。
+      // 終端余白は固定最小値 (112px) だけでなく内容から決める (8.2 節):
+      // 最後のペアの外側 (ボックス側) 小骨チェーン + ラベルが
+      // カテゴリボックスに重ならない縦距離を along-bone へ換算し、
+      // ボックス自体の高さ分も加える。
+      const endClearance = Math.max(
+        p.categoryEndClearanceMin,
+        (info.lastPairAwayFoot + 20) / sinA + info.categoryBoxHeight * 0.75,
+      );
+      info.majorRequiredLength = Math.ceil(
+        (info.farthestAttachDist + endClearance) / p.baseUnit
+      ) * p.baseUnit;
+    });
+
+    // ==== Phase 4: 上下同列カテゴリの大骨長を 18% 許容で統一 ====
+    // 完全な幾何学的統一より視覚密度の均衡を優先する。差が大きいときは
+    // 個別長を採用し、複雑なカテゴリが単純なカテゴリを間延びさせない。
+    const columnPairCount = Math.ceil(categoryInfos.length / 2);
+    for (let k = 0; k < columnPairCount; k++) {
+      const top = categoryInfos.find(c => c.idx === 2 * k && c.isTop);
+      const bot = categoryInfos.find(c => c.idx === 2 * k + 1 && !c.isTop);
+      if (top && bot) {
+        const a = top.majorRequiredLength, b = bot.majorRequiredLength;
+        const diffRatio = Math.abs(a - b) / Math.max(a, b);
+        const unified = diffRatio <= p.majorUnifyTolerance ? Math.max(a, b) : null;
+        top.majorBoneLength = unified ?? a;
+        bot.majorBoneLength = unified ?? b;
+      } else {
+        if (top) top.majorBoneLength = top.majorRequiredLength;
+        if (bot) bot.majorBoneLength = bot.majorRequiredLength;
+      }
+    }
+
+    // ==== Phase 5: キャンバスサイズに必要な縦横張り出しを算出 ====
+    categoryInfos.forEach(info => {
+      const causeContents = info.causeContents;
+      const maxCauseLabelW = Math.max(0, ...causeContents.map(c => c.causeLabelW));
+      const maxCauseLength = Math.max(0, ...causeContents.map(c => c.causeLength));
+      const hasAnySubcauses = causeContents.some(c => c.numSub > 0);
+      const hasAnyDetails = causeContents.some(c => c.hasDetails);
+      const maxSubLenAll = Math.max(0, ...causeContents.map(c => c.numSub > 0 ? c.subLen : 0));
+      const maxDetailLabelAll = Math.max(0, ...causeContents.map(c => c.maxDetailLabel));
+      const maxSubLabelLinesAll = Math.max(1, ...causeContents.map(c => c.maxSubLabelLines || 1));
+      const subLabelExtraH = (maxSubLabelLinesAll - 1) * (p.fontPx.subcause + 3);
+
+      info.subVertical = hasAnySubcauses
+        ? maxSubLenAll * sinS + p.subcauseLabelGap + 18 + subLabelExtraH
+        : 0;
+      const subHorizontalOuter = hasAnySubcauses ? maxSubLenAll * cosS : 0;
+      const detailHorizontalOuter = hasAnyDetails ? p.detailLength + maxDetailLabelAll + 16 : 0;
+      info.beyondAttachHorizontal = Math.max(
+        maxCauseLength + maxCauseLabelW + 12,
+        maxCauseLength + subHorizontalOuter + detailHorizontalOuter,
+      );
+
       const boneTipVertical =
-        globalL * sinA
-        + info.categoryBoxHeight * 0.25 * sinA  // ボックス中心の先端側オフセット
+        info.majorBoneLength * sinA
+        + info.categoryBoxHeight * 0.25 * sinA
         + info.categoryBoxHeight / 2 + 14;
       info.categoryVertical = Math.max(
-        info.farthestCauseY + info.subVertical + 24,
+        info.farthestAttachDist * sinA + info.subVertical + 24,
         boneTipVertical,
       );
-      info.majorHorizontal = globalL * cosA;
-      // 中骨ラベル/小骨連鎖の張り出しは beyondAttachHorizontal に集約済み
-      const farLeftFromSpine =
-        globalL * cosA * tMaxForExtents + info.beyondAttachHorizontal;
+      info.majorHorizontal = info.majorBoneLength * cosA;
+      const farLeftFromSpine = info.farthestAttachDist * cosA + info.beyondAttachHorizontal;
       info.horizontalExtentFromSpine = Math.max(
         info.majorHorizontal + info.categoryBoxWidth * 0.55 + 24,
         farLeftFromSpine + 20,
       );
     });
 
-    // 2) 上下別の最大値を取得
+    // 上下別の最大値を取得
     const topInfos = categoryInfos.filter(c => c.isTop);
     const botInfos = categoryInfos.filter(c => !c.isTop);
-
-    const maxVerticalTop = topInfos.length
-      ? Math.max(...topInfos.map(c => c.categoryVertical))
-      : 0;
-    const maxVerticalBot = botInfos.length
-      ? Math.max(...botInfos.map(c => c.categoryVertical))
-      : 0;
+    const maxVerticalTop = topInfos.length ? Math.max(...topInfos.map(c => c.categoryVertical)) : 0;
+    const maxVerticalBot = botInfos.length ? Math.max(...botInfos.map(c => c.categoryVertical)) : 0;
 
     // 効果ボックスがどちらの side にも収まるよう、最低限の半分高さを確保
     const effectLayoutEarly = this.computeEffectBoxLayout(data.effect || '');
     const minHalfForEffect = effectLayoutEarly.height / 2 + 40;
 
+    // キャンバスは内容へ密着させる (14.1 節)。上下の必要高さが大きく
+    // 異なる場合、背骨を無理にキャンバス中央へ置くと軽い側に巨大な
+    // 空白ができるため、上下それぞれの実必要量でキャンバスを取る。
+    // ただし極端な非対称は不安定に見えるため、軽い側にも重い側の
+    // 40% は確保する (ソフト対称性)。
     const halfHeightTopRaw = Math.max(maxVerticalTop + p.verticalMargin, minHalfForEffect);
     const halfHeightBotRaw = Math.max(maxVerticalBot + p.verticalMargin, minHalfForEffect);
-    // 背骨を常にキャンバスの上下中央に配置する (左右対称な見た目を維持)
-    const halfHeight = Math.max(
-      halfHeightTopRaw, halfHeightBotRaw, p.minCanvasHeight / 2
-    );
-    const svgHeight = halfHeight * 2;
-    const spineY = halfHeight;
+    const halfTop = Math.max(
+      halfHeightTopRaw, halfHeightBotRaw * 0.4, p.minCanvasHeight / 2);
+    const halfBot = Math.max(
+      halfHeightBotRaw, halfHeightTopRaw * 0.4, p.minCanvasHeight / 2);
+    const svgHeight = halfTop + halfBot;
+    const spineY = halfTop;
 
-    // 3) カテゴリを「列 (ペア)」単位で配置する
-    // 入力データの並び順は元々 4M の慣習で「機械, 人, 材料, 方法」のように
+    // カテゴリを「列 (ペア)」単位で配置する。入力データは 4M の慣習で
     // 上下交互 (idx%2 で isTop 判定) に並ぶため、連続する 2 件
-    // (idx=2k を上、idx=2k+1 を下) は視覚的に「同じ列」として対応する
-    // カテゴリだと期待できる (機械/人が左列、材料/方法が右列、など)。
-    // この列単位で同じ spineX を共有させることで、上下対称かつ
-    // 左右に整列した「教科書通りの 4M レイアウト」を実現する。
-    const safetyGap = 60;
-    const pairCount = Math.ceil(categoryInfos.length / 2);
+    // (idx=2k を上、idx=2k+1 を下) を同じ列として扱い、同じ spineX を
+    // 共有させることで上下対称・左右整列の教科書レイアウトを実現する。
+    // 列間隔もカテゴリ数や文字量が少なければ広げすぎない。
     const columns = [];
-    for (let k = 0; k < pairCount; k++) {
+    for (let k = 0; k < columnPairCount; k++) {
       const top = categoryInfos.find(c => c.idx === 2 * k && c.isTop);
       const bot = categoryInfos.find(c => c.idx === 2 * k + 1 && !c.isTop);
       columns.push([top, bot].filter(Boolean));
@@ -676,43 +580,44 @@ class IshikawaDiagram {
     let cursor = null;
     columns.forEach(members => {
       const extent = Math.max(...members.map(c => c.horizontalExtentFromSpine));
+      const columnGap = Math.round(p.columnGapPreferred / p.baseUnit) * p.baseUnit;
       const x = cursor === null
-        ? p.sideMarginX + extent
-        : cursor + extent + safetyGap;
+        ? p.horizontalMargin + extent
+        : cursor + extent + columnGap;
       members.forEach(c => { c.spineX = x; });
       cursor = x;
     });
 
-    // 4) spine の最右端: 最後の列の spine X
-    let lastCategoryX = cursor ?? p.sideMarginX;
-
-    // spine 終端: 最後の category から余裕を持って延長 (背骨先端の余地)
+    // spine の最右端: 最後の列の spine X
+    let lastCategoryX = cursor ?? p.horizontalMargin;
     const spineEndX = lastCategoryX + 100;
 
-    // 5) 効果ボックスの寸法を決定（テキスト長に応じて縦長 / 横長）
+    // 効果ボックスの寸法を決定（テキスト長に応じて縦長 / 横長）
     const effectText = data.effect || '';
     const effectLayout = this.computeEffectBoxLayout(effectText);
     const effectX = spineEndX + p.effectGap;
 
-    // 6) SVG 全体の幅 (アスペクト比下限を満たすよう左右パディング)
-    let svgWidth = effectX + effectLayout.width + p.sideMarginX;
-    let spineStartX = p.sideMarginX;
+    // SVG 全体の幅 (アスペクト比下限を満たすよう左右パディング)
+    let svgWidth = effectX + effectLayout.width + p.horizontalMargin;
+    let spineStartX = p.horizontalMargin;
     let effectXFinal = effectX;
     let spineEndXFinal = spineEndX;
 
-    // 最低アスペクト比を確保: ポートレート気味の図に水平余白を加えバランスを取る
-    const minAspect = 1.15;
-    if (svgWidth / svgHeight < minAspect) {
-      const targetWidth = svgHeight * minAspect;
-      const shift = (targetWidth - svgWidth) / 2;
+    // 目標アスペクト比は参考値とし、内容密着を優先する。アスペクト補正の
+    // 追加余白には上限を設け、無条件に大きな空白を追加しない。
+    const preferredAspectMin = 1.20;
+    if (svgWidth / svgHeight < preferredAspectMin) {
+      const targetWidth = svgHeight * preferredAspectMin;
+      const maxPadding = Math.min(p.maxAspectPadding, svgWidth * p.maxAspectPaddingRatio);
+      const shift = Math.min((targetWidth - svgWidth) / 2, maxPadding / 2);
       spineStartX += shift;
       spineEndXFinal += shift;
       effectXFinal += shift;
       categoryInfos.forEach(c => { c.spineX += shift; });
-      svgWidth = targetWidth;
+      svgWidth += shift * 2;
     }
 
-    // 7) 各カテゴリの大骨と原因の座標を計算 (シフト後の spineX を反映)
+    // 各カテゴリの大骨と原因の座標を計算 (シフト後の spineX を反映)
     categoryInfos.forEach(info => {
       this.computeCategoryGeometry(info, spineY, rad, sinA, cosA, subRad, sinS, cosS);
     });
@@ -752,74 +657,48 @@ class IshikawaDiagram {
       y: info.boneEndY + sign * boxOffset * sinA,
     };
 
-    // 中骨配置を 2 通りで分岐
-    const numCauses = info.numCauses;
-    let causePlacements; // [{t, side: 'left'|'right'}]
-
-    if (info.layoutMode === 'pair') {
-      // 中骨は大骨に沿って左右交互のサイクルで展開する (再帰ルール)。
-      // 同じペア (i, i+1) は同じ t (± stagger) を共有し、大骨の高さ順に
-      // 並べると必ず L,R,L,R,... の交互サイクルになる。
-      const numPairs = info.numPairs;
-      // pairTs は図全体で共有 (背骨に近い側から詰まっているため、
-      // 先頭から numPairs 個を使えばこのカテゴリでも背骨側の位置が揃う)
-      const pairTs = info.globalPairTs.slice(0, numPairs);
-      causePlacements = info.category.causes.map((_, i) => {
-        const side = info.sideOfIndex[i];
-        const k = info.pairSlotOfIndex[i];
-        return {
-          t: pairTs[k] + (side === 'left' ? -p.pairStaggerT : +p.pairStaggerT),
-          side,
-        };
-      });
-    } else {
-      const ts = this.computeEvenT(numCauses, p.singleTMin, p.singleTMax);
-      causePlacements = info.category.causes.map((_, i) => ({
-        t: ts[i],
-        side: 'left',
-      }));
-    }
-
+    // 中骨は絶対距離モデルで配置する (t 比率は使わない)。
+    // pairCenters[k] は背骨からの絶対距離 (px)。同じペア (i, i+1) は
+    // 同じ pairCenters を共有し、大骨の高さ順に並べると必ず
+    // L,R,L,R,... の交互サイクルになる (外側=center、内側=center+stagger)。
     info.causes = info.category.causes.map((cause, i) => {
-      const { t, side } = causePlacements[i];
-      // 大骨上の attach 座標
-      const attachX = info.spineX - info.majorBoneLength * cosA * t;
-      const attachY = spineY + sign * info.majorBoneLength * sinA * t;
-      const causeM = info.causeMetrics[i] || {};
+      const side = info.sideOfIndex[i];
+      const k = info.pairSlotOfIndex[i];
+      const distFromSpine = side === 'right'
+        ? info.pairCenters[k] + p.pairStaggerPx
+        : info.pairCenters[k];
+
+      const attachX = info.spineX - distFromSpine * cosA;
+      const attachY = spineY + sign * distFromSpine * sinA;
+      const cm = info.causeContents[i];
 
       // 中骨方向と長さ
-      // side='left'  : 外側 (-x), 長さは causeLength
+      // side='left'  : 外側 (-x), 長さは cm.causeLength
       // side='right' : 内側 (+x), 長さは背骨に届かないよう制限
       let direction, causeLen;
       if (side === 'left') {
         direction = -1;
-        causeLen = info.causeLength;
+        causeLen = cm.causeLength;
       } else {
         direction = 1;
         // 内側中骨の最大長: 先端の中骨ラベル・小骨/孫骨連鎖のいずれも
-        // 背骨に届かない距離に制限する。
-        // 小骨長は同階層で統一済み (info.subLenLong) — 実際の描画に
-        // 使われる値と同じ基準で評価する (この原因自身の孫骨有無/
-        // ラベル幅は個別に反映する)
-        const m = causeM;
-        const cosS = Math.cos((p.subcauseAngleDeg * Math.PI) / 180);
+        // 背骨に届かない距離に制限する (実行時安全キャップ)。
         const ownTipExtras = Math.max(
-          ((m.numSub || 0) > 0 ? info.subLenLong * cosS : 0)
-            + (m.hasDetails ? p.detailLength + (m.maxDetailLabel || 0) + 16 : 0),
-          (m.causeLabelW || 60) + 12,
-        ) + p.innerSafeMargin;
+          (cm.numSub > 0 ? cm.subLen * cosS : 0)
+            + (cm.hasDetails ? p.detailLength + cm.maxDetailLabel + 16 : 0),
+          cm.causeLabelW + 12,
+        ) + this.effectiveInnerSafeMargin();
         const distToSpine = info.spineX - attachX;
         const maxInner = distToSpine - ownTipExtras;
-        causeLen = Math.max(80, Math.min(info.causeLength, maxInner));
+        causeLen = Math.max(80, Math.min(cm.causeLength, maxInner));
       }
 
       const startX = attachX + direction * causeLen; // 中骨の free end
       const startY = attachY;
 
-      // 小骨レイアウト (side 情報と背骨 Y を伝搬)
-      // 小骨長は「同じ層の親骨」の原則により図全体で統一済み (info.subLenLong)
-      // causeSide を伝搬: 孫骨の左右交互展開を安全な範囲 (外側の中骨) に
-      // 限定するための判定材料として使う
+      // 小骨レイアウト (side 情報と背骨 Y を伝搬)。中骨自身の長さ (cm.subLen)
+      // を使う (図全体には統一しない)。causeSide を伝搬: 孫骨の左右交互
+      // 展開を安全な範囲 (外側の中骨) に限定するための判定材料として使う
       const subInfos = this.computeSubcauseGeometry(
         cause,
         {
@@ -829,9 +708,9 @@ class IshikawaDiagram {
           direction,
           spineY,
           spineX: info.spineX,
-          subLen: info.subLenLong,
+          subLen: cm.subLen,
           causeSide: side,
-          maxSubLabel: causeM.maxSubLabel || 0,
+          maxSubLabel: cm.maxSubLabel || 0,
           // 孫骨の交互展開の安全判定 (大骨との交差チェック) に使う
           boneStartX: info.spineX,
           boneStartY: spineY,
@@ -866,16 +745,19 @@ class IshikawaDiagram {
     const subs = cause.subcauses;
     if (!subs.length) return [];
 
-    // 小骨は「中骨の付け根 (大骨側 = 親の親に近い側)」の subcauseTMax から
-    // 実際に必要な間隔だけ詰めて展開する (親骨の起点側から展開)。
-    // 子が少ないカテゴリでは大骨側にまとまり、多い原因だけが先端側へ
-    // 伸びるため、図全体で統一した中骨長 (info.causeLength) を使っても
-    // 不要な空白が生まれない。stepPx は「同じ側 (上/下) の隣接小骨」が
-    // 重ならない間隔 (ラベル幅+マージン) の半分 (2 ステップで 1 間隔分)。
-    const labelSafeSpacing = (ctx.maxSubLabel || 0) + 24;
-    const stepPx = labelSafeSpacing / 2;
-    const ts = this.computeAnchoredPackedT(
-      subs.length, p.subcauseTMax, stepPx, ctx.causeLen, -1, p.subcauseTMin,
+    // 小骨は「中骨の付け根 (大骨側 = 親の親に近い側)」から絶対距離
+    // firstSubcauseGap (既定 48px) を基準に開始し、実際に必要な間隔だけ
+    // 自由端方向へ詰めて展開する (t 比率は使わない)。子が少ない中骨は
+    // 付け根付近にまとまり、多い中骨だけが自由端側へ伸びる。stepPx は
+    // 「同じ側 (上/下) の隣接小骨」が重ならない間隔 (ラベル幅+マージン)
+    // の半分 (2 ステップで 1 間隔分)。
+    // 上下交互のインターリーブ配置: 同じ側 (2本毎) はラベル幅ベースの
+    // 安全間隔、隣り合う反対側は 32px の段差のみ (Phase 1 と同じ計算)。
+    // 終端余白 40px: 中骨の自由端には中骨ラベルが置かれるため、
+    // 最後の小骨がそこへ近づきすぎないようにする (subTipClear と対応)
+    const distances = this.computeInterleavedDistances(
+      subs.length, p.firstSubcauseGap, (ctx.maxSubLabel || 0) + 24, p.subStagger,
+      ctx.causeLen, 40,
     );
     const horizontalDir = ctx.direction;
     // 内側小骨が背骨にぶつからないよう、最大長を概算
@@ -884,23 +766,23 @@ class IshikawaDiagram {
     const distToSpineY = Math.abs(ctx.attachY - (ctx.spineY ?? 0));
     const innerSubMaxLen =
       distToSpineY > 0
-        ? Math.max(40, (distToSpineY - p.innerSafeMargin) / sinS)
+        ? Math.max(40, (distToSpineY - this.effectiveInnerSafeMargin()) / sinS)
         : ctx.subLen;
 
-    // 「同じ側 (上/下)」の隣接小骨との間隔。
+    // 「同じ側 (上/下)」の隣接小骨との間隔 (px、実測)。
     // 小骨は上下交互のため、衝突リスクがあるのは同じ側の小骨同士のみ
     // (i と i+2)。隣り合う i と i+1 は反対側なので考慮不要 — ここを
     // 誤って考慮すると安全距離が半分になり反転がほぼ常に禁止されてしまう。
     // 孫骨を反転展開する際、同じ側の次の小骨の陣地まで届かないよう
     // この値の一部を安全な反転距離の上限として使う。
     const sameSideStepX = subs.length > 2
-      ? Math.abs(ts[2] - ts[0]) * Math.abs(ctx.attachX - ctx.startX)
+      ? Math.abs(distances[2] - distances[0])
       : Infinity; // 同じ側の隣が存在しない (2本以下) → 制約なし
     const maxSafeFlipReach = sameSideStepX * 0.46;
 
     return subs.map((sub, i) => {
-      const t = ts[i];
-      const attachX = ctx.startX + (ctx.attachX - ctx.startX) * t;
+      const d = distances[i]; // 中骨の付け根からの絶対距離 (px)
+      const attachX = ctx.attachX + horizontalDir * d;
       const attachY = ctx.startY;
 
       // 上下交互 (i=0 → 外側、i=1 → 内側)
@@ -977,13 +859,10 @@ class IshikawaDiagram {
     const p = this.params;
     if (!sub.details.length) return [];
 
-    // 孫骨は「小骨の付け根 (中骨側 = 親の親に近い側)」の detailTMin から
-    // 実際に必要な間隔だけ詰めて展開する (親骨の起点側から展開)。
-    // 詳細が少ない小骨は付け根付近にまとまり、多い小骨だけが先端側へ
-    // 伸びるため、図全体で統一した小骨長 (info.subLenLong) でも
-    // 不要な空白が生まれない。孫骨は基本的に同一方向へ並ぶ (allowAlternate
-    // が有効な場合のみ隣が反転) ため、隣接間隔はラベル幅そのものを使う
-    // (小骨側の「同じ側 (2本毎)」の緩和は適用しない)。
+    // 孫骨は「小骨の付け根 (中骨側 = 親の親に近い側)」から絶対距離
+    // firstDetailGap (既定 32px) を基準に開始し、実際に必要な間隔だけ
+    // 自由端方向へ詰めて展開する (t 比率は使わない)。詳細が少ない小骨は
+    // 付け根付近にまとまり、多い小骨だけが自由端側へ伸びる。
     const detailLabelMs = sub.details.map(d =>
       this.wrappedLabelMetrics(
         typeof d === 'string' ? d : d.name, p.fontPx.detail, p.labelWrapWidth.detail));
@@ -991,8 +870,11 @@ class IshikawaDiagram {
       ? Math.max(...detailLabelMs.map(m => m.width))
       : 0;
     const stepPx = maxDetailLabelHere + p.detailLabelGap * 2 + 14;
-    const ts = this.computeAnchoredPackedT(
-      sub.details.length, p.detailTMin, stepPx, ctx.subLen, +1, p.detailTMax,
+    // 終端余白 32px: 小骨の自由端には小骨ラベルが置かれるため、
+    // 最後の孫骨がそこへ近づきすぎないようにする (Phase 1 の
+    // detailTipClear と対応)
+    const distances = this.computeAnchoredPackedDistances(
+      sub.details.length, p.firstDetailGap, stepPx, ctx.subLen, 32,
     );
     const parentDir = ctx.horizontalDir;
     const hasBoneRef = ctx.boneStartX !== undefined && ctx.boneEndX !== undefined;
@@ -1001,9 +883,9 @@ class IshikawaDiagram {
       const detail = typeof detailRaw === 'string'
         ? { name: detailRaw, important: false }
         : detailRaw;
-      const t = ts[i];
-      const attachX = ctx.attachX + (ctx.endX - ctx.attachX) * t;
-      const attachY = ctx.attachY + (ctx.endY - ctx.attachY) * t;
+      const d = distances[i]; // 小骨の付け根からの絶対距離 (px)
+      const attachX = ctx.attachX + ctx.horizontalDir * ctx.cosS * d;
+      const attachY = ctx.attachY + ctx.verticalDir * ctx.sinS * d;
 
       let isOuterDetail = !ctx.allowAlternate || (i % 2 === 0);
 
@@ -1027,7 +909,7 @@ class IshikawaDiagram {
           safeFromBone = !this.segmentTooCloseToLine(
             attachX, attachY, flippedStartX, attachY,
             ctx.boneStartX, ctx.boneStartY, ctx.boneEndX, ctx.boneEndY,
-            p.innerSafeMargin
+            this.effectiveInnerSafeMargin()
           );
         }
 
@@ -1129,60 +1011,108 @@ class IshikawaDiagram {
   }
 
   /**
-   * ペア配置の各ペアの t 位置を、大骨の背骨側 (pairTAnchor) から
-   * 実際に必要な間隔分だけ詰めて計算する (親骨の起点側から展開)。
-   * L (大骨長) が大きいほど同じ物理間隔に必要な t は縮む。
+   * 汎用: 親骨上で子骨を「親の親に近い側」から絶対距離 (px) で詰めて
+   * 配置する。firstGap を起点に、以降は stepPx ずつ自由端方向へ進む。
+   * 親骨長は Phase 1 でこの配置に必要な長さを見込んで決まっているため、
+   * 通常は収まる。極端に収まらない場合のみ全体を比例圧縮する
+   * (per-step クランプだと複数点が同じ位置に重なりラベルが完全一致して
+   *  しまうため、必ず不等間隔を保つ)。
    */
-  computePairPackedT(numPairs, L, verticalNeed, innerNeedByPairIndex, sinA, cosA) {
-    const p = this.params;
-    if (numPairs <= 0) return [];
-    const tStep = numPairs > 1 ? verticalNeed / (sinA * L) : 0;
-    const ts = [];
-    for (let k = 0; k < numPairs; k++) {
-      const need = innerNeedByPairIndex[k] || 0;
-      const minT = need > 0 ? Math.max(0, need / (cosA * L) - p.pairStaggerT) : 0;
-      const base = k === 0 ? p.pairTAnchor : ts[k - 1] + tStep;
-      ts.push(Math.max(base, minT));
-    }
-    return ts;
-  }
-
-  /**
-   * 汎用: 親骨上で子骨を「親の親に近い側 (anchorT)」から実際に必要な
-   * 物理間隔 (stepPx) の分だけ順に詰めて配置する。子が少なければ
-   * anchorT 付近にまとまり、子が多いほど dirSign 方向へ伸びる —
-   * 均等配置 (computeEvenT) のように常に全域へ間延びさせない。
-   * tBound を渡した場合、自然な (詰めた) 配置が tBound を超えるときは
-   * 全体を均等スケールし、最後の点がちょうど tBound に収まるようにする
-   * (単純な per-step クランプだと複数点が同じ tBound 値に重なって
-   *  ラベルが完全一致・重複してしまうため、必ず不等間隔を保つ)。
-   * 十分な余地がない極端なケースでは、結果的に旧来の均等配置と同じになる。
-   */
-  computeAnchoredPackedT(n, anchorT, stepPx, parentLenPx, dirSign, tBound) {
+  computeAnchoredPackedDistances(n, firstGap, stepPx, parentLenPx, endPad = 0) {
     if (n <= 0) return [];
-    if (n === 1) return [anchorT];
-    const tStep = parentLenPx > 0 ? stepPx / parentLenPx : 0;
-    const ts = [anchorT];
+    const ds = [firstGap];
     for (let k = 1; k < n; k++) {
-      ts.push(ts[k - 1] + dirSign * tStep);
+      ds.push(ds[k - 1] + stepPx);
     }
-    if (tBound === undefined) return ts;
-    const last = ts[n - 1];
-    const overshoot = dirSign < 0 ? (tBound - last) : (last - tBound);
-    if (overshoot <= 0) return ts;
-    const span = last - anchorT; // 同じ符号 (dirSign) を持つ
-    const scale = span !== 0 ? (tBound - anchorT) / span : 0;
-    return ts.map(t => anchorT + (t - anchorT) * scale);
+    const limit = Math.max(firstGap, parentLenPx - endPad);
+    const last = ds[n - 1];
+    if (last <= limit || n === 1) return ds;
+    const span = last - firstGap;
+    const scale = span > 0 ? (limit - firstGap) / span : 0;
+    return ds.map(d => firstGap + (d - firstGap) * scale);
   }
 
   /**
-   * 0..1 区間で N 個を tMin..tMax の範囲に均等配置
+   * 上下 (左右) 交互に展開する子骨の親骨上の絶対距離を計算する。
+   * 交互配置では衝突リスクがあるのは「同じ側 (index 差 2)」の子同士
+   * のみなので、同じ側にはラベル幅ベースの安全間隔 (sameSideStep) を、
+   * 隣り合う反対側の子には小さな段差 (oppStagger) だけを与える。
+   * これにより、均等な全間隔確保よりも大幅にコンパクトに詰められる。
+   * parentLenPx - endPad に収まらない場合は全体を比例圧縮する
+   * (per-step クランプによる完全重なりを避ける)。
    */
-  computeEvenT(n, tMin, tMax) {
+  computeInterleavedDistances(n, firstGap, sameSideStep, oppStagger, parentLenPx, endPad = 0) {
     if (n <= 0) return [];
-    if (n === 1) return [(tMin + tMax) / 2];
-    const step = (tMax - tMin) / (n - 1);
-    return Array.from({ length: n }, (_, i) => tMin + i * step);
+    const ds = [];
+    for (let i = 0; i < n; i++) {
+      if (i === 0) ds.push(firstGap);
+      else if (i === 1) ds.push(firstGap + oppStagger);
+      else ds.push(ds[i - 2] + sameSideStep);
+    }
+    if (parentLenPx === undefined) return ds;
+    const limit = Math.max(firstGap, parentLenPx - endPad);
+    const last = ds[n - 1];
+    if (last <= limit || n === 1) return ds;
+    const span = last - firstGap;
+    const scale = span > 0 ? (limit - firstGap) / span : 0;
+    return ds.map(d => firstGap + (d - firstGap) * scale);
+  }
+
+  /**
+   * カテゴリ内の骨長を「長さバンド」へゆるく統一する。
+   *  1. 各必要長を bandPx 単位へ切り上げ (量子化)
+   *  2. 昇順に走査し、直前バンドとの差が tolerance 以内なら同じバンドへ
+   *     統合 (大きい方へ揃える)
+   *  3. バンド数が maxBands を超える場合は、最も近い隣接バンド同士を
+   *     統合してバンド数を減らす
+   * 完全にバラバラの長さ (不揃い) と、図全体の一律統一 (単純カテゴリの
+   * 間延び) の中間を取る方式 (仕様 9.4 節)。
+   */
+  bandUnify(requiredLens, bandPx, tolerance, maxBands, minLen) {
+    if (!requiredLens.length) return [];
+    const quantized = requiredLens.map(len =>
+      Math.ceil(Math.max(minLen, len) / bandPx) * bandPx);
+
+    // 昇順のユニーク値をバンド候補とし、tolerance 以内の隣接値を統合
+    const sorted = [...new Set(quantized)].sort((a, b) => a - b);
+    const bands = [];
+    sorted.forEach(v => {
+      const last = bands[bands.length - 1];
+      if (last !== undefined && (v - last.max) / v <= tolerance) {
+        last.max = v; // 統合 (大きい方へ)
+      } else {
+        bands.push({ min: v, max: v });
+      }
+    });
+    // バンド数が上限を超える場合、間隔が最も近い隣接バンドを統合
+    while (bands.length > maxBands) {
+      let bestIdx = 0;
+      let bestGap = Infinity;
+      for (let i = 0; i + 1 < bands.length; i++) {
+        const gap = bands[i + 1].min - bands[i].max;
+        if (gap < bestGap) { bestGap = gap; bestIdx = i; }
+      }
+      bands[bestIdx].max = bands[bestIdx + 1].max;
+      bands.splice(bestIdx + 1, 1);
+    }
+    // 各値を所属バンドの代表値 (max) へ割当て
+    return quantized.map(v => {
+      const band = bands.find(b => v <= b.max) || bands[bands.length - 1];
+      return band.max;
+    });
+  }
+
+  /**
+   * 内側 (背骨側) 骨の実効安全距離 (仕様 12 節)。
+   * 固定値だけでなく、フォントサイズ・矢印サイズも考慮する。
+   */
+  effectiveInnerSafeMargin() {
+    const p = this.params;
+    return Math.max(
+      p.innerSafeMargin,
+      p.fontPx.subcause * 1.4,
+      10 + 8, // 中骨矢印サイズ + 8
+    );
   }
 
   /**
