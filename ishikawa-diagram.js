@@ -422,56 +422,79 @@ class IshikawaDiagram {
         outerNeed + innerNeed + 36 + causeLabelExtraH,
       );
 
-      // 両側配置に必要な大骨長には相反する 2 つの要求がある:
-      //   (a) 内側 (奇数番目) 原因の先端張り出しを確保する要求
-      //       → pairTMin を大きく (背骨から離す) するほど楽になる
-      //   (b) ペア間の縦方向間隔を確保する要求
-      //       → pairTMin を小さくして pairTRange を広げるほど楽になる
-      // 固定の pairTMin を使うと、ペア数が少ないカテゴリは (a) が
-      // 支配的になり大骨が無駄に伸び (スカスカの原因)、ペア数が多い
-      // カテゴリでは逆に (b) が支配的になり破綻する。
-      // → カテゴリごとに両者が釣り合う最適な pairTMin をグリッド
-      //   サーチし、大骨長を最小化する (子が少ない骨まで間延びしない)。
+      // 両側配置: 左 (外側) と右 (内側) を完全に分離して考える。
+      // 左側は背骨クリアランスの制約が無いため、単一モード同様に
+      // 背骨ギリギリまで詰められる。右側だけが「先端張り出しの
+      // 確保」という制約を持つため、右側の必要量だけで大骨長を決め、
+      // 左側はその大骨長の下で可能な限り背骨に寄せる。
+      // (従来は左右を同じ t 範囲で揃えていたため、右側の制約に
+      //  引きずられて左側まで背骨から離れ、スカスカに見えていた)
+      const numLeft = Math.ceil(numCauses / 2);
+      const numRight = Math.floor(numCauses / 2);
+      // 右側の最先端 t は左側よりわずかに手前にする: 両方とも
+      // pairTMax ちょうどだと最も外側の左右中骨の attach 点が
+      // 大骨上の同一座標に重なり、矢先が衝突して見えるため。
+      const rightTMax = p.pairTMax - p.pairStaggerT;
+
       const tipExtrasOf = m => Math.max(
         (m.numSub > 0 ? subLenLong * cosS : 0)
           + (m.hasDetails ? p.detailLength + m.maxDetailLabel + 16 : 0),
         m.causeLabelW + 12,
       );
-      // 内側 (右) 原因ごとの必要長 (ペア k 番目に属する)
-      const innerNeedByPairIndex = []; // k -> required ownLen+tipExtras+margin
+      // 右側 (奇数番目) 原因ごとの必要長 (右側内での並び順 k)
+      const innerNeedByRightIndex = [];
       causeMetrics.forEach((m, i) => {
         if (i % 2 !== 1) return;
         const k = Math.floor(i / 2);
         const ownLen = Math.max(90, m.numSub > 0 ? m.subMinLen + 20 : 0);
         const need = ownLen + tipExtrasOf(m) + p.innerSafeMargin;
-        innerNeedByPairIndex[k] = Math.max(innerNeedByPairIndex[k] || 0, need);
+        innerNeedByRightIndex[k] = Math.max(innerNeedByRightIndex[k] || 0, need);
       });
 
-      const evalMajorForPairTMin = (tMin) => {
-        const pairTRange = p.pairTMax - tMin;
-        const requiredVertical = numPairs <= 1
+      const evalRightForTMin = (tMin) => {
+        const tRange = rightTMax - tMin;
+        const requiredVertical = numRight <= 1
           ? 0
-          : verticalNeedBetweenCauses * (numPairs - 1) / (sinA * pairTRange);
-        const pairTs = this.computeEvenT(numPairs, tMin, p.pairTMax);
+          : verticalNeedBetweenCauses * (numRight - 1) / (sinA * tRange);
+        const ts = this.computeEvenT(numRight, tMin, rightTMax);
         let requiredInner = 0;
-        innerNeedByPairIndex.forEach((need, k) => {
-          const tPos = (pairTs[k] ?? p.pairTMax) + p.pairStaggerT;
+        innerNeedByRightIndex.forEach((need, k) => {
+          const tPos = ts[k] ?? rightTMax;
           requiredInner = Math.max(requiredInner, need / (cosA * tPos));
         });
         return Math.max(440, requiredVertical, requiredInner);
       };
 
-      const [searchMin, searchMax] = p.pairTMinSearchRange;
-      const searchSteps = 24;
-      let bestPairTMin = p.pairTMin;
-      let majorByBothSides = Infinity;
-      for (let s = 0; s <= searchSteps; s++) {
-        const candidate = searchMin + (searchMax - searchMin) * (s / searchSteps);
-        const required = evalMajorForPairTMin(candidate);
-        if (required < majorByBothSides) {
-          majorByBothSides = required;
-          bestPairTMin = candidate;
+      let bestPairTMinRight = p.pairTMin;
+      let majorByBothSides;
+      if (numRight === 0) {
+        // 右側が存在しない (通常は numCauses=1 で単側モードになるため
+        // ここには来ないが、念のためのフォールバック)
+        majorByBothSides = 440;
+      } else {
+        const [searchMin, searchMax] = p.pairTMinSearchRange;
+        const searchSteps = 24;
+        majorByBothSides = Infinity;
+        for (let s = 0; s <= searchSteps; s++) {
+          const candidate = searchMin + (searchMax - searchMin) * (s / searchSteps);
+          const required = evalRightForTMin(candidate);
+          if (required < majorByBothSides) {
+            majorByBothSides = required;
+            bestPairTMinRight = candidate;
+          }
         }
+      }
+
+      // 左側 (外側) は確定した大骨長の下で、縦間隔さえ確保できれば
+      // 制約なく背骨に寄せてよい。単一モードの下限 (singleTMin) まで
+      // 詰めることを許容する。
+      let bestPairTMinLeft;
+      if (numLeft <= 1) {
+        bestPairTMinLeft = p.singleTMin;
+      } else {
+        const requiredLeftTRange =
+          verticalNeedBetweenCauses * (numLeft - 1) / (sinA * majorByBothSides);
+        bestPairTMinLeft = Math.max(p.singleTMin, p.pairTMax - requiredLeftTRange);
       }
 
       // 片側配置 (フォールバック): すべての中骨が外側に伸びる
@@ -499,7 +522,10 @@ class IshikawaDiagram {
         subLenLong,
         majorByBothSides,
         majorBySingleSide,
-        pairTMinUsed: bestPairTMin,
+        pairTMinLeftUsed: bestPairTMinLeft,
+        pairTMinRightUsed: bestPairTMinRight,
+        numLeft,
+        numRight,
         // 以降は最終 globalL 決定後に再計算
         majorBoneLength: 0,
         majorHorizontal: 0,
@@ -536,12 +562,12 @@ class IshikawaDiagram {
     ));
 
     // 各カテゴリに統一 L を適用し、派生量を計算
-    // ペア配置では右側 (内側) 中骨が pairTMax + pairStaggerT まで進むため、
-    // extents はスタガー分を含めて計算する
+    // ペア配置では左側が pairTMax まで到達するため、それが最遠点になる
+    // (右側は rightTMax = pairTMax - stagger でそれより手前に留まる)
     categoryInfos.forEach(info => {
       info.majorBoneLength = globalL;
       const tMaxForExtents = (info.layoutMode === 'pair')
-        ? p.pairTMax + p.pairStaggerT : p.singleTMax;
+        ? p.pairTMax : p.singleTMax;
       info.farthestCauseY = globalL * sinA * tMaxForExtents;
       // 縦張り出しは「最遠中骨 + 小骨」と「大骨先端 + カテゴリボックス」の大きい方
       // (大骨先端は t=1.0 なので、大型キャンバスでは中骨最遠点より遠くなる)
@@ -689,17 +715,21 @@ class IshikawaDiagram {
     let causePlacements; // [{t, side: 'left'|'right'}]
 
     if (info.layoutMode === 'pair') {
-      const numPairs = info.numPairs;
-      // pairTMin はカテゴリごとに最適化済み (info.pairTMinUsed) — スカスカ防止
-      const pairTs = this.computeEvenT(numPairs, info.pairTMinUsed, p.pairTMax);
-      // ペアの左右を大骨上で少しずらす: 同一点に 2 つの矢先が刺さると衝突するため
-      // (参考画像でも左右の中骨は少し段違いに描かれる)
-      // 内側 (right) を +δ にすると背骨からの距離が増え、内側キャップにも有利
-      causePlacements = info.category.causes.map((_, i) => ({
-        t: pairTs[Math.floor(i / 2)]
-          + ((i % 2 === 0) ? -p.pairStaggerT : +p.pairStaggerT),
-        side: (i % 2 === 0) ? 'left' : 'right',
-      }));
+      // 左 (外側) と右 (内側) は完全に独立した t 配列を持つ
+      // (info.pairTMinLeftUsed/RightUsed でカテゴリごとに最適化済み)。
+      // 右側は背骨クリアランスの制約で背骨から離れた位置に、
+      // 左側はその制約が無いため背骨ギリギリまで詰められる。
+      const rightTMax = p.pairTMax - p.pairStaggerT;
+      const leftTs = this.computeEvenT(info.numLeft, info.pairTMinLeftUsed, p.pairTMax);
+      const rightTs = this.computeEvenT(info.numRight, info.pairTMinRightUsed, rightTMax);
+      let leftIdx = 0, rightIdx = 0;
+      causePlacements = info.category.causes.map((_, i) => {
+        const isLeft = i % 2 === 0;
+        if (isLeft) {
+          return { t: leftTs[leftIdx++], side: 'left' };
+        }
+        return { t: rightTs[rightIdx++], side: 'right' };
+      });
     } else {
       const ts = this.computeEvenT(numCauses, p.singleTMin, p.singleTMax);
       causePlacements = info.category.causes.map((_, i) => ({
