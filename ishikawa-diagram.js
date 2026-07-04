@@ -422,85 +422,52 @@ class IshikawaDiagram {
         outerNeed + innerNeed + 36 + causeLabelExtraH,
       );
 
-      // 両側配置: 左 (外側) と右 (内側) を完全に分離して考える。
-      // 左側は背骨クリアランスの制約が無いため、単一モード同様に
-      // 背骨ギリギリまで詰められる。右側だけが「先端張り出しの
-      // 確保」という制約を持つため、右側の必要量だけで大骨長を決め、
-      // 左側はその大骨長の下で可能な限り背骨に寄せる。
-      // (従来は左右を同じ t 範囲で揃えていたため、右側の制約に
-      //  引きずられて左側まで背骨から離れ、スカスカに見えていた)
-      const numLeft = Math.ceil(numCauses / 2);
-      const numRight = Math.floor(numCauses / 2);
-      // 右側の最先端 t は左側よりわずかに手前にする: 両方とも
-      // pairTMax ちょうどだと最も外側の左右中骨の attach 点が
-      // 大骨上の同一座標に重なり、矢先が衝突して見えるため。
-      const rightTMax = p.pairTMax - p.pairStaggerT;
-
+      // 両側配置: 中骨は「同じ親骨 (大骨) 上で左右交互のサイクル」で
+      // 展開する (再帰ルール: 斜め骨の子は左右交互)。
+      // このため左右は同じ t 配列を共有するペア単位で配置し、
+      // 大骨に沿った見た目の順序が必ず L,R,L,R,... と交互になるように
+      // する (左右を別々の t 範囲に分離すると、大骨上の実際の高さ順が
+      // L,R,R,L のように崩れて交互サイクルに見えなくなるため)。
       const tipExtrasOf = m => Math.max(
         (m.numSub > 0 ? subLenLong * cosS : 0)
           + (m.hasDetails ? p.detailLength + m.maxDetailLabel + 16 : 0),
         m.causeLabelW + 12,
       );
-      // 右側 (奇数番目) 原因ごとの必要長 (右側内での並び順 k)
-      const innerNeedByRightIndex = [];
+      // 内側 (右、奇数番目) 原因ごとの必要長 (ペア k 番目に属する)
+      const innerNeedByPairIndex = [];
       causeMetrics.forEach((m, i) => {
         if (i % 2 !== 1) return;
         const k = Math.floor(i / 2);
         const ownLen = Math.max(90, m.numSub > 0 ? m.subMinLen + 20 : 0);
         const need = ownLen + tipExtrasOf(m) + p.innerSafeMargin;
-        innerNeedByRightIndex[k] = Math.max(innerNeedByRightIndex[k] || 0, need);
+        innerNeedByPairIndex[k] = Math.max(innerNeedByPairIndex[k] || 0, need);
       });
 
-      const evalRightForTMin = (tMin) => {
-        const tRange = rightTMax - tMin;
-        const requiredVertical = numRight <= 1
+      const evalMajorForPairTMin = (tMin) => {
+        const tRange = p.pairTMax - tMin;
+        const requiredVertical = numPairs <= 1
           ? 0
-          : verticalNeedBetweenCauses * (numRight - 1) / (sinA * tRange);
-        const ts = this.computeEvenT(numRight, tMin, rightTMax);
+          : verticalNeedBetweenCauses * (numPairs - 1) / (sinA * tRange);
+        const pairTs = this.computeEvenT(numPairs, tMin, p.pairTMax);
         let requiredInner = 0;
-        innerNeedByRightIndex.forEach((need, k) => {
-          const tPos = ts[k] ?? rightTMax;
+        innerNeedByPairIndex.forEach((need, k) => {
+          const tPos = (pairTs[k] ?? p.pairTMax) + p.pairStaggerT;
           requiredInner = Math.max(requiredInner, need / (cosA * tPos));
         });
         return Math.max(440, requiredVertical, requiredInner);
       };
 
-      let bestPairTMinRight = p.pairTMin;
-      let majorByBothSides;
-      if (numRight === 0) {
-        // 右側が存在しない (通常は numCauses=1 で単側モードになるため
-        // ここには来ないが、念のためのフォールバック)
-        majorByBothSides = 440;
-      } else {
-        const [searchMin, searchMax] = p.pairTMinSearchRange;
-        const searchSteps = 24;
-        majorByBothSides = Infinity;
-        for (let s = 0; s <= searchSteps; s++) {
-          const candidate = searchMin + (searchMax - searchMin) * (s / searchSteps);
-          const required = evalRightForTMin(candidate);
-          if (required < majorByBothSides) {
-            majorByBothSides = required;
-            bestPairTMinRight = candidate;
-          }
+      const [searchMin, searchMax] = p.pairTMinSearchRange;
+      const searchSteps = 24;
+      let bestPairTMin = p.pairTMin;
+      let majorByBothSides = Infinity;
+      for (let s = 0; s <= searchSteps; s++) {
+        const candidate = searchMin + (searchMax - searchMin) * (s / searchSteps);
+        const required = evalMajorForPairTMin(candidate);
+        if (required < majorByBothSides) {
+          majorByBothSides = required;
+          bestPairTMin = candidate;
         }
-      }
-
-      // 左側 (外側) は確定した大骨長の下で、縦間隔さえ確保できれば
-      // 制約なく背骨に寄せてよい。単一モードの下限 (singleTMin) まで
-      // 詰めることを許容する。
-      // 「縦間隔を満たすための上限」は pairTMax - requiredLeftTRange であり、
-      // tMinLeft は「背骨に近いほど良い」ので、その上限と singleTMin の
-      // 小さい方 (=より背骨に近い方) を採用する。
-      // (以前は Math.max を使っており、逆に背骨から遠ざける計算に
-      //  なっていたバグがあった)
-      let bestPairTMinLeft;
-      if (numLeft <= 1) {
-        bestPairTMinLeft = p.singleTMin;
-      } else {
-        const requiredLeftTRange =
-          verticalNeedBetweenCauses * (numLeft - 1) / (sinA * majorByBothSides);
-        const maxAllowedTMinLeft = p.pairTMax - requiredLeftTRange;
-        bestPairTMinLeft = Math.max(0.05, Math.min(p.singleTMin, maxAllowedTMinLeft));
       }
 
       // 片側配置 (フォールバック): すべての中骨が外側に伸びる
@@ -528,10 +495,7 @@ class IshikawaDiagram {
         subLenLong,
         majorByBothSides,
         majorBySingleSide,
-        pairTMinLeftUsed: bestPairTMinLeft,
-        pairTMinRightUsed: bestPairTMinRight,
-        numLeft,
-        numRight,
+        pairTMinUsed: bestPairTMin,
         // 以降は最終 globalL 決定後に再計算
         majorBoneLength: 0,
         majorHorizontal: 0,
@@ -568,12 +532,12 @@ class IshikawaDiagram {
     ));
 
     // 各カテゴリに統一 L を適用し、派生量を計算
-    // ペア配置では左側が pairTMax まで到達するため、それが最遠点になる
-    // (右側は rightTMax = pairTMax - stagger でそれより手前に留まる)
+    // ペア配置では右側 (内側) 中骨が pairTMax + pairStaggerT まで進むため、
+    // extents はスタガー分を含めて計算する
     categoryInfos.forEach(info => {
       info.majorBoneLength = globalL;
       const tMaxForExtents = (info.layoutMode === 'pair')
-        ? p.pairTMax : p.singleTMax;
+        ? p.pairTMax + p.pairStaggerT : p.singleTMax;
       info.farthestCauseY = globalL * sinA * tMaxForExtents;
       // 縦張り出しは「最遠中骨 + 小骨」と「大骨先端 + カテゴリボックス」の大きい方
       // (大骨先端は t=1.0 なので、大型キャンバスでは中骨最遠点より遠くなる)
@@ -721,21 +685,16 @@ class IshikawaDiagram {
     let causePlacements; // [{t, side: 'left'|'right'}]
 
     if (info.layoutMode === 'pair') {
-      // 左 (外側) と右 (内側) は完全に独立した t 配列を持つ
-      // (info.pairTMinLeftUsed/RightUsed でカテゴリごとに最適化済み)。
-      // 右側は背骨クリアランスの制約で背骨から離れた位置に、
-      // 左側はその制約が無いため背骨ギリギリまで詰められる。
-      const rightTMax = p.pairTMax - p.pairStaggerT;
-      const leftTs = this.computeEvenT(info.numLeft, info.pairTMinLeftUsed, p.pairTMax);
-      const rightTs = this.computeEvenT(info.numRight, info.pairTMinRightUsed, rightTMax);
-      let leftIdx = 0, rightIdx = 0;
-      causePlacements = info.category.causes.map((_, i) => {
-        const isLeft = i % 2 === 0;
-        if (isLeft) {
-          return { t: leftTs[leftIdx++], side: 'left' };
-        }
-        return { t: rightTs[rightIdx++], side: 'right' };
-      });
+      // 中骨は大骨に沿って左右交互のサイクルで展開する (再帰ルール)。
+      // 同じペア (i, i+1) は同じ t (± stagger) を共有し、大骨の高さ順に
+      // 並べると必ず L,R,L,R,... の交互サイクルになる。
+      const numPairs = info.numPairs;
+      const pairTs = this.computeEvenT(numPairs, info.pairTMinUsed, p.pairTMax);
+      causePlacements = info.category.causes.map((_, i) => ({
+        t: pairTs[Math.floor(i / 2)]
+          + ((i % 2 === 0) ? -p.pairStaggerT : +p.pairStaggerT),
+        side: (i % 2 === 0) ? 'left' : 'right',
+      }));
     } else {
       const ts = this.computeEvenT(numCauses, p.singleTMin, p.singleTMax);
       causePlacements = info.category.causes.map((_, i) => ({
