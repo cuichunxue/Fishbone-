@@ -125,6 +125,12 @@ class IshikawaDiagram {
       // 最小分離距離 (px)。全要素の外接矩形がこの距離以上離れるよう、
       // スロット間隔・大骨長が数学的に確定する (唯一の美観ノブ)。
       gapPaddingPx: 12,
+      // 内側 (背骨側) 中骨の内容が「大骨の背骨接続点 X」を右へ越えて
+      // よい距離 (px)。背骨は水平線であり、接続点の右側 (隣の列との間)
+      // は実際には空き空間のため、ここを使うことで中骨を背骨へ大きく
+      // 寄せられる (60° 幾何では水平 288px ≒ 垂直 500px 相当)。
+      // 右への実張り出しは列間隔・背骨終端の計算で厳密に吸収する。
+      innerOverhangPx: 288,
       // 内側 (背骨側) 原因の骨本体分の事前確保に対する緩和係数。
       // 1.0 = 完全事前確保 (キャップ発動 0 だが背骨際の空白が大きい)。
       // 小さいほど背骨に詰まるが、実行時キャップ + インターリーブ圧縮に
@@ -419,7 +425,8 @@ class IshikawaDiagram {
             : pairCenters[k - 1] + p.pairGapMin;
           if (pairInner[k] !== undefined) {
             center = Math.max(center,
-              innerNeedOf(causeContents[pairInner[k]]) / cosA - p.pairStaggerPx);
+              (innerNeedOf(causeContents[pairInner[k]]) - p.innerOverhangPx) / cosA
+                - p.pairStaggerPx);
           }
           center = Math.max(center, p.minimumFirstCauseGap);
           pairCenters[k] = Math.ceil(center / p.baseUnit) * p.baseUnit;
@@ -531,20 +538,24 @@ class IshikawaDiagram {
       columns.push([top, bot].filter(Boolean));
     }
 
+    // 内側中骨は背骨接続点 X を右へ innerOverhangPx まで越えてよいため、
+    // 実張り出し (rightOverhangPx) を列間隔へ厳密に組み込む
     let cursor = null;
+    let prevOverhang = 0;
     columns.forEach(members => {
       const extent = Math.max(...members.map(c => c.horizontalExtentFromSpine));
       const columnGap = Math.round(p.columnGapPreferred / p.baseUnit) * p.baseUnit;
       const x = cursor === null
         ? p.horizontalMargin + extent
-        : cursor + extent + columnGap;
+        : cursor + prevOverhang + extent + columnGap;
       members.forEach(c => { c.spineX = x; });
       cursor = x;
+      prevOverhang = Math.max(0, ...members.map(c => c.rightOverhangPx || 0));
     });
 
-    // spine の最右端: 最後の列の spine X
+    // spine の最右端: 最後の列の spine X + 右張り出し (特性ボックスと重ねない)
     let lastCategoryX = cursor ?? p.horizontalMargin;
-    const spineEndX = lastCategoryX + 100;
+    const spineEndX = lastCategoryX + Math.max(100, prevOverhang + 24);
 
     // 効果ボックスの寸法を決定（テキスト長に応じて縦長 / 横長）
     const effectText = data.effect || '';
@@ -642,8 +653,11 @@ class IshikawaDiagram {
             + (cm.hasDetails ? p.detailLength + cm.maxDetailLabel + 16 : 0),
           cm.causeLabelW + 12,
         ) + this.effectiveInnerSafeMargin();
+        // 内容は背骨接続点 X を innerOverhangPx まで越えてよい
+        // (背骨は水平線であり、接続点の右は列間の空き空間。
+        //  実張り出しは列パッキングが吸収する)
         const distToSpine = info.spineX - attachX;
-        const maxInner = distToSpine - ownTipExtras;
+        const maxInner = distToSpine + p.innerOverhangPx - ownTipExtras;
         causeLen = Math.max(80, Math.min(cm.causeLength, maxInner));
       }
 
@@ -1133,6 +1147,11 @@ class IshikawaDiagram {
       ? this.minSeparationPush(allBoxes, [boxAABB], ux, uy, pad)
       : 0;
     info.majorRequiredLength = Math.ceil((L0 + dL) / p.baseUnit) * p.baseUnit;
+
+    // 背骨接続点 X (ローカル座標 0) を右へ越える実張り出しを記録する。
+    // 列パッキングと背骨終端がこの分を厳密に確保する。
+    info.rightOverhangPx = Math.max(
+      0, ...allBoxes.map(b => b.x + b.w)) ;
   }
 
   /**
