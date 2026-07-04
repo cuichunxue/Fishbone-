@@ -719,6 +719,8 @@ class IshikawaDiagram {
 
       // 小骨レイアウト (side 情報と背骨 Y を伝搬)
       // 小骨長は「同じ層の親骨」の原則により図全体で統一済み (info.subLenLong)
+      // causeSide を伝搬: 孫骨の左右交互展開を安全な範囲 (外側の中骨) に
+      // 限定するための判定材料として使う
       const subInfos = this.computeSubcauseGeometry(
         cause,
         {
@@ -729,6 +731,12 @@ class IshikawaDiagram {
           spineY,
           spineX: info.spineX,
           subLen: info.subLenLong,
+          causeSide: side,
+          // 孫骨の交互展開の安全判定 (大骨との交差チェック) に使う
+          boneStartX: info.spineX,
+          boneStartY: spineY,
+          boneEndX: info.boneEndX,
+          boneEndY: info.boneEndY,
         },
         subRad, sinS, cosS,
       );
@@ -769,6 +777,18 @@ class IshikawaDiagram {
         ? Math.max(40, (distToSpineY - p.innerSafeMargin) / sinS)
         : ctx.subLen;
 
+    // 「同じ側 (上/下)」の隣接小骨との間隔。
+    // 小骨は上下交互のため、衝突リスクがあるのは同じ側の小骨同士のみ
+    // (i と i+2)。隣り合う i と i+1 は反対側なので考慮不要 — ここを
+    // 誤って考慮すると安全距離が半分になり反転がほぼ常に禁止されてしまう。
+    // 孫骨を反転展開する際、同じ側の次の小骨の陣地まで届かないよう
+    // この値の一部を安全な反転距離の上限として使う。
+    const stepT = subs.length > 1 ? (p.subcauseTMax - p.subcauseTMin) / (subs.length - 1) : 0;
+    const sameSideStepX = subs.length > 2
+      ? Math.abs(ctx.attachX - ctx.startX) * stepT * 2
+      : Infinity; // 同じ側の隣が存在しない (2本以下) → 制約なし
+    const maxSafeFlipReach = sameSideStepX * 0.46;
+
     return subs.map((sub, i) => {
       const t = ts[i];
       const attachX = ctx.startX + (ctx.attachX - ctx.startX) * t;
@@ -799,6 +819,10 @@ class IshikawaDiagram {
       const endX = attachX + dx;
       const endY = attachY + dy;
 
+      // 孫骨の左右交互展開は「外側の中骨 かつ 外側の小骨」に限定候補とし、
+      // さらに大骨ラインとの実際の交差チェックを個別に行う (computeDetailGeometry 内)
+      const allowAlternateDetails = (ctx.causeSide === 'left') && isOuterSub;
+
       const detailInfos = this.computeDetailGeometry(
         sub,
         {
@@ -808,6 +832,12 @@ class IshikawaDiagram {
           horizontalDir,
           subLen: len,
           sinS, cosS,
+          allowAlternate: allowAlternateDetails,
+          maxSafeFlipReach,
+          boneStartX: ctx.boneStartX,
+          boneStartY: ctx.boneStartY,
+          boneEndX: ctx.boneEndX,
+          boneEndY: ctx.boneEndY,
         }
       );
 
@@ -823,20 +853,24 @@ class IshikawaDiagram {
   /**
    * 孫骨は小骨ライン上に分岐する。
    *
-   * 当初は「斜め骨 ⇒ 孫骨は左右交互」ルールを適用したが、
-   * INNER 孫骨が親小骨の傾きと大骨方向の関係で大骨ラインに干渉する
-   * ケースが発生したため、孫骨は親小骨方向に統一して伸ばす方式に変更。
+   * ルール: 小骨は斜め骨 ⇒ 孫骨は左右交互に展開する (再帰ルール)。
+   * ただし当初は全ての小骨でこれを適用したところ、INNER 孫骨が
+   * 親小骨の傾きと大骨方向の関係で大骨ラインに干渉するケースが
+   * 発生したため、交互展開は ctx.allowAlternate が true の場合のみ
+   * (= 外側の中骨 かつ 外側の小骨という最も安全な組み合わせ) 有効にし、
+   * それ以外 (内側配置で大骨に近い場合) は従来通り親小骨と同じ方向に
+   * 統一して安全性を確保する。
    *
-   * 親小骨が斜めのため、孫骨の attach Y は t に応じて自然に
-   * 縦方向にずれる。これにより孫骨ラベル同士は重ならない。
-   * (左右交互の見栄えは、親小骨の傾きで実現される)
+   * 交互展開時: 偶数番目 (i=0,2,...) は親と同じ方向 (外側)、
+   * 奇数番目 (i=1,3,...) は反対方向 (内側) に伸ばす。
    */
   computeDetailGeometry(sub, ctx) {
     const p = this.params;
     if (!sub.details.length) return [];
 
     const ts = this.computeEvenT(sub.details.length, p.detailTMin, p.detailTMax);
-    const horizontalDir = ctx.horizontalDir; // 親小骨と同じ向きで外側へ
+    const parentDir = ctx.horizontalDir;
+    const hasBoneRef = ctx.boneStartX !== undefined && ctx.boneEndX !== undefined;
 
     return sub.details.map((detailRaw, i) => {
       const detail = typeof detailRaw === 'string'
@@ -845,6 +879,37 @@ class IshikawaDiagram {
       const t = ts[i];
       const attachX = ctx.attachX + (ctx.endX - ctx.attachX) * t;
       const attachY = ctx.attachY + (ctx.endY - ctx.attachY) * t;
+
+      let isOuterDetail = !ctx.allowAlternate || (i % 2 === 0);
+
+      if (!isOuterDetail) {
+        // 反転候補: 大骨ラインとの交差、および隣接小骨の陣地への
+        // 侵入を検査する。ラベルは線の終点からさらに外側に伸びて
+        // 描画されるため、ラベル幅も含めた「実効到達距離」で判定する
+        // (線分だけで判定するとラベルがはみ出て交差/衝突する)
+        const detailName = typeof detailRaw === 'string' ? detailRaw : detailRaw.name;
+        const labelW = this.estimateTextWidth(detailName, p.fontPx.detail);
+        const effectiveReach = p.detailLength + labelW + 8;
+
+        // 1) 隣接小骨の領域を侵さないか (中骨上の間隔の 42% を上限とする)
+        const withinNeighborBudget =
+          !isFinite(ctx.maxSafeFlipReach) || effectiveReach <= ctx.maxSafeFlipReach;
+
+        // 2) 大骨ラインとの交差・過度な接近がないか
+        let safeFromBone = true;
+        if (hasBoneRef) {
+          const flippedStartX = attachX - parentDir * effectiveReach;
+          safeFromBone = !this.segmentTooCloseToLine(
+            attachX, attachY, flippedStartX, attachY,
+            ctx.boneStartX, ctx.boneStartY, ctx.boneEndX, ctx.boneEndY,
+            p.innerSafeMargin
+          );
+        }
+
+        if (!withinNeighborBudget || !safeFromBone) isOuterDetail = true;
+      }
+
+      const horizontalDir = isOuterDetail ? parentDir : -parentDir;
 
       const startX = attachX + horizontalDir * p.detailLength;
       const startY = attachY;
@@ -857,6 +922,37 @@ class IshikawaDiagram {
         horizontalDir,
       };
     });
+  }
+
+  /**
+   * 線分 (ax,ay)-(bx,by) が 直線 (lx1,ly1)-(lx2,ly2) の有限線分に
+   * margin 未満まで接近する、または交差するかどうかを判定する。
+   * 孫骨の反転展開が大骨ラインに干渉しないかの安全チェックに使用。
+   */
+  segmentTooCloseToLine(ax, ay, bx, by, lx1, ly1, lx2, ly2, margin) {
+    // 線分同士の交差判定 (交差していれば当然危険)
+    const ccw = (p1x, p1y, p2x, p2y, p3x, p3y) =>
+      (p3y - p1y) * (p2x - p1x) - (p2y - p1y) * (p3x - p1x);
+    const d1 = ccw(lx1, ly1, lx2, ly2, ax, ay);
+    const d2 = ccw(lx1, ly1, lx2, ly2, bx, by);
+    const d3 = ccw(ax, ay, bx, by, lx1, ly1);
+    const d4 = ccw(ax, ay, bx, by, lx2, ly2);
+    if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+        ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) {
+      return true; // 実際に交差
+    }
+    // 交差していなくても、線分 (ax,ay)-(bx,by) の端点 b が大骨線分に
+    // margin 未満まで接近していないか (点と線分の最短距離) を確認
+    const distPointToSegment = (px, py, x1, y1, x2, y2) => {
+      const dx = x2 - x1, dy = y2 - y1;
+      const lenSq = dx * dx + dy * dy;
+      let t = lenSq > 0 ? ((px - x1) * dx + (py - y1) * dy) / lenSq : 0;
+      t = Math.max(0, Math.min(1, t));
+      const cx = x1 + t * dx, cy = y1 + t * dy;
+      return Math.hypot(px - cx, py - cy);
+    };
+    const dist = distPointToSegment(bx, by, lx1, ly1, lx2, ly2);
+    return dist < margin;
   }
 
   /**
