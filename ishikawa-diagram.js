@@ -121,6 +121,10 @@ class IshikawaDiagram {
       categoryBoxHeight: 48,
       effectGap: 18,               // 背骨矢先は特性ボックスに接する (教科書ルール)
       innerSafeMargin: 24,
+      // 厳密ジオメトリ解決 (solveCategoryExactGaps) における要素間の
+      // 最小分離距離 (px)。全要素の外接矩形がこの距離以上離れるよう、
+      // スロット間隔・大骨長が数学的に確定する (唯一の美観ノブ)。
+      gapPaddingPx: 12,
       // 内側 (背骨側) 原因の骨本体分の事前確保に対する緩和係数。
       // 1.0 = 完全事前確保 (キャップ発動 0 だが背骨際の空白が大きい)。
       // 小さいほど背骨に詰まるが、実行時キャップ + インターリーブ圧縮に
@@ -376,43 +380,6 @@ class IshikawaDiagram {
         const ownLen = Math.max(70, c.numSub > 0 ? c.subSpanPx * p.innerReserveRelax : 0);
         return ownLen + tipExtrasOf(c) + effMargin;
       };
-      // 小骨チェーンの縦方向 (y) 占有。away = 背骨から離れる側 (外側小骨 =
-      // 偶数番目、1本以上で発生)、toward = 背骨へ向かう側 (内側小骨 =
-      // 奇数番目、2本以上で発生)。小骨長は 1 本ごとに異なる (Phase 2) ため、
-      // 該当する側の小骨の実長の最大値で評価する。
-      // ペア間ギャップ用は折返し追加行 + ラベル余白のみ (実証済みの旧式)。
-      const subLabelExtraOf = c =>
-        (c.maxSubLabelLines - 1) * (p.fontPx.subcause + 3) + p.subcauseLabelGap;
-      // 側の割当て (computeSubcauseGeometry と同じ規則):
-      //  内容の軽い (孫骨の少ない) floor(n/2) 本 → 内側 (toward)、
-      //  残りの重い方 → 外側 (away)。
-      //  内側は孫骨なしなら 0.68 短縮で描画されるため、内側全てが
-      //  孫骨なしの場合は toward 占有も短縮後の実効長で評価する。
-      const towardHasDetailsOf = c => {
-        const k = Math.floor(c.numSub / 2);
-        if (k <= 0) return false;
-        const detailCounts = c.cause.subcauses
-          .map(s => s.details.length)
-          .sort((a, b) => a - b);
-        return detailCounts.slice(0, k).some(n => n > 0);
-      };
-      const maxTowardLenOf = c => c.numSub >= 2
-        ? c.subLen * (towardHasDetailsOf(c) ? 1 : p.subcauseStaggerRatio)
-        : 0;
-      const awayFootOf = c => c.numSub >= 1
-        ? (c.subLen * sinS + subLabelExtraOf(c)) : 0;
-      const towardFootOf = c => c.numSub >= 2
-        ? (maxTowardLenOf(c) * sinS + subLabelExtraOf(c)) : 0;
-      const causeLabelExtraHOf = c => (c.causeLabelLines - 1) * (p.fontPx.cause + 3);
-      // 内側小骨 (とそのラベル) が背骨に届かないために必要な
-      // 「中骨の背骨からの y 距離」→ attach 距離 (along-bone) への変換は /sinA。
-      // 小骨の骨本体分には innerReserveRelax をかける (不足時は実行時の
-      // innerSubMaxLen キャップが短縮して吸収する)。ラベル 1 行目の高さ +
-      // アンカーオフセット (~14px) + 安全余白はハード制約なので緩和しない。
-      const towardSpineSafeDistOf = c => c.numSub >= 2
-        ? (maxTowardLenOf(c) * sinS * p.innerReserveRelax + subLabelExtraOf(c) + 14 + effMargin) / sinA
-        : 0;
-
       if (info.layoutMode === 'pair') {
         // 内容量 (内側配置時の必要長) 昇順に並べ、軽いペアを背骨側にまとめる。
         // L,R,L,R... の交互サイクルは大骨上の「位置」の順序であり、
@@ -440,101 +407,42 @@ class IshikawaDiagram {
           }
         }
 
-        const pairCausesOf = k => [pairOuter[k], pairInner[k]]
-          .filter(i => i !== undefined)
-          .map(i => causeContents[i]);
-
-        // 各ペアの左右それぞれの away/toward 占有。中骨の小骨チェーンは
-        // 大骨の左右どちらか一方の側にあり、反対側のチェーンとは
-        // 水平位置が重ならない — よってペア間の必要 y 距離は
-        // 「同じ側同士 (L-L / R-R)」で独立に評価し、大きい方を採る。
-        // 左右まとめて max を取ると、重いチェーンが反対側同士の場合に
-        // 不要に広い間隔になる (スカスカの一因)。
-        const sideFootsOf = k => ({
-          awayL: pairOuter[k] !== undefined ? awayFootOf(causeContents[pairOuter[k]]) : 0,
-          awayR: pairInner[k] !== undefined ? awayFootOf(causeContents[pairInner[k]]) : 0,
-          towardL: pairOuter[k] !== undefined ? towardFootOf(causeContents[pairOuter[k]]) : 0,
-          towardR: pairInner[k] !== undefined ? towardFootOf(causeContents[pairInner[k]]) : 0,
-        });
-
+        // 初期値 (下限シード): 最初のペアは 48px 基準、以降は最小間隔のみ。
+        // 実際の間隔は solveCategoryExactGaps が「描画される全要素の
+        // 外接矩形の厳密な分離条件」から数学的に確定する。
+        // 内側原因の水平クリアランス (attach 距離 × cos60° ≥ 必要水平距離)
+        // だけは、実行時キャップによる小骨圧縮を防ぐためシードで確保する。
         const pairCenters = [];
         for (let k = 0; k < numPairs; k++) {
-          const causesHere = pairCausesOf(k);
-          let center;
-          if (k === 0) {
-            center = p.preferredFirstCauseGap;
-          } else {
-            // 隣接ペア間の必要 y 距離 = 同じ側の「手前ペアの away 小骨 +
-            // 奥ペアの toward 小骨」の大きい方 + ラベル分
-            // → along-bone は /sinA
-            const prev = sideFootsOf(k - 1);
-            const here = sideFootsOf(k);
-            const chainNeed = Math.max(
-              prev.awayL + here.towardL,
-              prev.awayR + here.towardR,
-            );
-            const labelExtra = Math.max(...causesHere.map(causeLabelExtraHOf), 0);
-            // +22 は中骨ラベル 1 行分 + 余白 (pairGapPadding 相当を含む)
-            const verticalNeed = chainNeed + 30 + labelExtra;
-            const gap = Math.max(p.pairGapMin, verticalNeed / sinA);
-            center = pairCenters[k - 1] + gap;
-          }
-          // 内側原因が背骨までの水平距離を確保できる along-bone 距離。
-          // 水平距離 = attachDist * cosA なので変換は /cosA
-          // (7.1 節: 安全を確保できない場合のみ既定 48px を超えることを許可)
+          let center = k === 0
+            ? p.preferredFirstCauseGap
+            : pairCenters[k - 1] + p.pairGapMin;
           if (pairInner[k] !== undefined) {
-            const requiredCenter =
-              innerNeedOf(causeContents[pairInner[k]]) / cosA - p.pairStaggerPx;
-            center = Math.max(center, requiredCenter);
+            center = Math.max(center,
+              innerNeedOf(causeContents[pairInner[k]]) / cosA - p.pairStaggerPx);
           }
-          // 内側小骨 (toward 側) が背骨に届かない along-bone 距離
-          center = Math.max(center, ...causesHere.map(towardSpineSafeDistOf));
           center = Math.max(center, p.minimumFirstCauseGap);
-          if (k > 0) center = Math.max(center, pairCenters[k - 1] + p.pairGapMin);
-          pairCenters[k] = center;
+          pairCenters[k] = Math.ceil(center / p.baseUnit) * p.baseUnit;
         }
-
-        // 8px の距離リズムへ丸める (切り上げで安全側)
         info.sideOfIndex = sideOfIndex;
         info.pairSlotOfIndex = pairSlotOfIndex;
-        info.pairCenters = pairCenters.map(c => Math.ceil(c / p.baseUnit) * p.baseUnit);
-        info.farthestAttachDist = info.pairCenters[numPairs - 1] + p.pairStaggerPx;
-        info.lastPairAwayFoot = Math.max(...pairCausesOf(numPairs - 1).map(awayFootOf), 0);
-        info.lastPairMaxSubLen = Math.max(
-          ...pairCausesOf(numPairs - 1).map(c => c.numSub > 0 ? c.subLen : 0), 0);
+        info.pairCenters = pairCenters;
       } else {
-        // 原因が1本のカテゴリ: 固定 t 範囲を使わず、背骨から
-        // preferredFirstCauseGap を基準に外側配置する (22 節)。
-        // 内側小骨が背骨に届く場合のみ、安全な距離まで移動する (12 節:
-        // 長さの強制短縮ではなく接続位置の移動で解決する)。
-        // 原因が 0 本 (空カテゴリ) でも骨とボックスは描画するため、
-        // 既定距離で安全にフォールバックする。
-        const c0 = causeContents[0];
-        const d = Math.max(
-          p.preferredFirstCauseGap,
-          c0 ? towardSpineSafeDistOf(c0) : 0,
-        );
+        // 原因が1本 (または0本の空カテゴリ): 背骨から
+        // preferredFirstCauseGap を基準に外側配置 (22 節)。
+        // 背骨とのクリアランスは solveCategoryExactGaps が厳密に確保する。
         info.sideOfIndex = ['left'];
         info.pairSlotOfIndex = [0];
-        info.pairCenters = [Math.ceil(d / p.baseUnit) * p.baseUnit];
-        info.farthestAttachDist = info.pairCenters[0];
-        info.lastPairAwayFoot = c0 ? awayFootOf(c0) : 0;
-        info.lastPairMaxSubLen = c0 && c0.numSub > 0 ? c0.subLen : 0;
+        info.pairCenters = [p.preferredFirstCauseGap];
       }
 
-      // ---- 大骨の必要長 ----
-      // 最後の中骨の attach 位置 + カテゴリ側終端余白。
-      // 終端余白は固定最小値 (112px) だけでなく内容から決める (8.2 節):
-      // 最後のペアの外側 (ボックス側) 小骨チェーン + ラベルが
-      // カテゴリボックスに重ならない縦距離を along-bone へ換算し、
-      // ボックス自体の高さ分も加える。
-      const endClearance = Math.max(
-        p.categoryEndClearanceMin,
-        (info.lastPairAwayFoot + 20) / sinA + info.categoryBoxHeight * 0.75,
-      );
-      info.majorRequiredLength = Math.ceil(
-        (info.farthestAttachDist + endClearance) / p.baseUnit
-      ) * p.baseUnit;
+      // ---- 厳密ジオメトリ解決 ----
+      // 全要素 (骨線・ラベル・重要マーク楕円) の外接矩形を実際の描画式で
+      // 生成し、(a) 背骨ラインとのクリアランス、(b) スロット (ペア) 間の
+      // 分離、(c) カテゴリボックスとの分離を、平行移動パラメータに関する
+      // 1 次元の厳密な区間解として解く。ヒューリスティックな占有量の
+      // 合算ではなく、要素ペアごとの最小分離距離の最大値で間隔が決まる。
+      this.solveCategoryExactGaps(info, rad, sinA, cosA, subRad, sinS, cosS);
     });
 
     // ==== Phase 4: 大骨長を図全体で統一 ====
@@ -1129,6 +1037,253 @@ class IshikawaDiagram {
     const span = last - firstGap;
     const scale = span > 0 ? (limit - firstGap) / span : 0;
     return ds.map(d => firstGap + (d - firstGap) * scale);
+  }
+
+  /**
+   * ==== 厳密ジオメトリ解決 ====
+   * カテゴリ内のスロット (ペア) 位置と大骨必要長を、実際に描画される
+   * 全要素の外接矩形から数学的に厳密に確定する。
+   *
+   * 原理: スロット k の全要素は、attach 距離を δ 増やすと
+   * u = (-cos60°, ∓sin60°) 方向へ剛体的に平行移動する。よって
+   * 「要素 A (固定) と要素 B (移動) が重ならない最小の δ」は、
+   * 各軸の区間重なり条件を δ の 1 次不等式として解いた区間の上端で
+   * 閉形式に求まる (minSeparationPush)。制約は 3 種:
+   *   (a) 背骨ライン: 全要素が y=背骨 から実効安全距離以上離れる
+   *   (b) スロット間: 手前の全スロットの要素と最小分離距離以上離れる
+   *   (c) カテゴリボックス: ボックス矩形が全要素と分離する → 大骨長
+   * 内側中骨の実行時キャップは attach 距離に依存する (剛体でない) ため、
+   * ジオメトリを再構築しながら固定点まで反復する (単調増加で収束)。
+   */
+  solveCategoryExactGaps(info, rad, sinA, cosA, subRad, sinS, cosS) {
+    const p = this.params;
+    const sign = info.isTop ? -1 : 1;
+    const ux = -cosA;
+    const uy = sign * sinA;
+    const pad = p.gapPaddingPx;
+    const effMargin = this.effectiveInnerSafeMargin();
+    const numSlots = info.pairCenters.length;
+    const stagger = info.layoutMode === 'pair' ? p.pairStaggerPx : 0;
+
+    const rebuild = () => {
+      info.spineX = 0;
+      info.majorBoneLength =
+        info.pairCenters[numSlots - 1] + stagger + 600; // 仮長 (骨端は後で確定)
+      this.computeCategoryGeometry(info, 0, rad, sinA, cosA, subRad, sinS, cosS);
+      const slotBoxes = Array.from({ length: numSlots }, () => []);
+      info.causes.forEach((ci, i) => {
+        slotBoxes[info.pairSlotOfIndex[i]].push(
+          ...this.collectCauseElementBoxes(ci, info.isTop));
+      });
+      return slotBoxes;
+    };
+
+    for (let iter = 0; iter < 6; iter++) {
+      const slotBoxes = rebuild();
+      let changed = false;
+      const fixed = [];
+      for (let k = 0; k < numSlots; k++) {
+        let delta = 0;
+        // (a) 背骨ライン (ローカル座標 y=0) との厳密クリアランス
+        for (const b of slotBoxes[k]) {
+          const need = info.isTop
+            ? ((b.y + b.h) + effMargin) / sinA
+            : ((effMargin - b.y)) / sinA;
+          if (need > delta) delta = need;
+        }
+        // (b) 手前スロット群との厳密分離
+        if (fixed.length && slotBoxes[k].length) {
+          const d2 = this.minSeparationPush(fixed, slotBoxes[k], ux, uy, pad);
+          if (d2 > delta) delta = d2;
+        }
+        if (delta > 0.5) {
+          info.pairCenters[k] = Math.ceil(
+            (info.pairCenters[k] + delta) / p.baseUnit) * p.baseUnit;
+          changed = true;
+          slotBoxes[k] = slotBoxes[k].map(b => ({
+            x: b.x + delta * ux, y: b.y + delta * uy, w: b.w, h: b.h,
+          }));
+        }
+        if (k > 0 && info.pairCenters[k] < info.pairCenters[k - 1] + p.pairGapMin) {
+          info.pairCenters[k] = Math.ceil(
+            (info.pairCenters[k - 1] + p.pairGapMin) / p.baseUnit) * p.baseUnit;
+          changed = true;
+        }
+        fixed.push(...slotBoxes[k]);
+      }
+      if (!changed) break;
+    }
+
+    info.farthestAttachDist = info.pairCenters[numSlots - 1] + stagger;
+
+    // (c) カテゴリボックスとの厳密分離 → 大骨必要長
+    const slotBoxes = rebuild();
+    const allBoxes = slotBoxes.flat();
+    const L0 = info.farthestAttachDist + p.categoryEndClearanceMin;
+    const boxOffset = info.categoryBoxHeight * 0.25;
+    const bcx = -(L0 + boxOffset) * cosA;
+    const bcy = sign * (L0 + boxOffset) * sinA;
+    const boxAABB = {
+      x: bcx - info.categoryBoxWidth / 2,
+      y: bcy - info.categoryBoxHeight / 2,
+      w: info.categoryBoxWidth,
+      h: info.categoryBoxHeight,
+    };
+    const dL = allBoxes.length
+      ? this.minSeparationPush(allBoxes, [boxAABB], ux, uy, pad)
+      : 0;
+    info.majorRequiredLength = Math.ceil((L0 + dL) / p.baseUnit) * p.baseUnit;
+  }
+
+  /**
+   * 1 つの中骨とその配下 (小骨・孫骨・全ラベル・重要マーク楕円) の
+   * 外接矩形リストを、描画コード (drawCause/drawSubcause/drawDetail)
+   * と同一の式で生成する。斜めの線分は短い区間に分割して外接矩形の
+   * 過大評価を防ぐ (AABB のまま扱うと 60° 線は巨大な矩形になるため)。
+   */
+  collectCauseElementBoxes(causeInfo, isTop) {
+    const p = this.params;
+    const boxes = [];
+    const pushSeg = (x1, y1, x2, y2, inflate) => {
+      const len = Math.hypot(x2 - x1, y2 - y1);
+      const steps = Math.max(1, Math.ceil(len / 16));
+      for (let s = 0; s < steps; s++) {
+        const t0 = s / steps, t1 = (s + 1) / steps;
+        const xa = x1 + (x2 - x1) * t0, ya = y1 + (y2 - y1) * t0;
+        const xb = x1 + (x2 - x1) * t1, yb = y1 + (y2 - y1) * t1;
+        boxes.push({
+          x: Math.min(xa, xb) - inflate,
+          y: Math.min(ya, yb) - inflate,
+          w: Math.abs(xb - xa) + 2 * inflate,
+          h: Math.abs(yb - ya) + 2 * inflate,
+        });
+      }
+    };
+    const isLeft = causeInfo.direction === -1;
+
+    // 中骨ライン + ラベル (drawCause と同一の式)
+    pushSeg(causeInfo.startX, causeInfo.startY,
+      causeInfo.attachX, causeInfo.attachY, 2);
+    {
+      const lines = this.wrapLabel(
+        causeInfo.cause.name, p.fontPx.cause, p.labelWrapWidth.cause);
+      const labelDy = lines.length > 1
+        ? 0 : (isTop ? -p.causeLabelGap * 0.4 : p.causeLabelGap * 0.4);
+      boxes.push(this.labelBlockBBox(
+        causeInfo.startX + (isLeft ? -6 : 6), causeInfo.startY + labelDy,
+        lines, p.fontPx.cause, isLeft ? 'end' : 'start', 0,
+        causeInfo.cause.important));
+    }
+
+    const cosS60 = Math.cos((p.subcauseAngleDeg * Math.PI) / 180);
+    const sinS60 = Math.sin((p.subcauseAngleDeg * Math.PI) / 180);
+    causeInfo.subInfos.forEach(si => {
+      pushSeg(si.endX, si.endY, si.attachX, si.attachY, 2);
+      const sIsLeft = si.horizontalDir === -1;
+      const lines = this.wrapLabel(
+        si.sub.name, p.fontPx.subcause, p.labelWrapWidth.subcause);
+      boxes.push(this.labelBlockBBox(
+        si.endX + si.horizontalDir * 8 * cosS60,
+        si.endY + si.verticalDir * 8 * sinS60 + si.verticalDir * 6,
+        lines, p.fontPx.subcause, sIsLeft ? 'end' : 'start', si.verticalDir,
+        si.sub.important));
+      si.detailInfos.forEach(di => {
+        pushSeg(di.startX, di.startY, di.attachX, di.attachY, 1.5);
+        const dIsLeft = di.horizontalDir === -1;
+        const dLines = this.wrapLabel(
+          di.detail.name, p.fontPx.detail, p.labelWrapWidth.detail);
+        boxes.push(this.labelBlockBBox(
+          di.startX + (dIsLeft ? -2 : 2),
+          di.startY + di.verticalDir * 7,
+          dLines, p.fontPx.detail, dIsLeft ? 'end' : 'start', di.verticalDir,
+          di.detail.important));
+      });
+    });
+    return boxes;
+  }
+
+  /**
+   * createWrappedText / createImportanceEllipse と同一の配置式で
+   * ラベルブロック (+ 重要マーク楕円) の外接矩形を返す。
+   */
+  labelBlockBBox(x, y, lines, fontSize, anchor, stackDir, important = false) {
+    const lineH = fontSize + 3;
+    const n = lines.length;
+    let y0;
+    if (stackDir < 0) y0 = y - (n - 1) * lineH;
+    else if (stackDir > 0) y0 = y;
+    else y0 = y - ((n - 1) * lineH) / 2;
+    const w = Math.max(...lines.map(l => this.estimateTextWidth(l, fontSize)));
+    const top = y0 - fontSize / 2;
+    const h = (n - 1) * lineH + fontSize;
+    let x0;
+    if (anchor === 'end') x0 = x - w;
+    else if (anchor === 'start') x0 = x;
+    else x0 = x - w / 2;
+    let box = { x: x0, y: top, w, h };
+    if (important) {
+      const cx = anchor === 'end' ? x - w / 2 : anchor === 'start' ? x + w / 2 : x;
+      const cy = y0 + ((n - 1) * lineH) / 2;
+      const rx = w / 2 + 14;
+      const ry = h / 2 + 9;
+      const ex0 = Math.min(box.x, cx - rx);
+      const ey0 = Math.min(box.y, cy - ry);
+      box = {
+        x: ex0, y: ey0,
+        w: Math.max(box.x + box.w, cx + rx) - ex0,
+        h: Math.max(box.y + box.h, cy + ry) - ey0,
+      };
+    }
+    return box;
+  }
+
+  /**
+   * 固定ボックス群 fixed と、方向 (ux,uy) に δ だけ平行移動する
+   * ボックス群 moving の間で、全ペアが pad 以上分離する最小の δ ≥ 0 を
+   * 厳密に求める。各ペアの「重なりが生じる δ 区間 (lo,hi)」を各軸の
+   * 1 次不等式から閉形式で計算し、δ=0 から区間を順に飛び越えて
+   * 最初の非重なり点を返す。
+   */
+  minSeparationPush(fixedBoxes, movingBoxes, ux, uy, pad) {
+    const INF = 1e15;
+    const axisWindow = (a0, a1, b0, b1, v) => {
+      // 重なり条件: b0+δv < a1+pad かつ b1+δv > a0-pad
+      let lo = -INF, hi = INF;
+      const c1 = a1 + pad - b0;
+      if (Math.abs(v) < 1e-12) { if (c1 <= 0) return null; }
+      else if (v > 0) hi = Math.min(hi, c1 / v);
+      else lo = Math.max(lo, c1 / v);
+      const c2 = a0 - pad - b1;
+      if (Math.abs(v) < 1e-12) { if (c2 >= 0) return null; }
+      else if (v > 0) lo = Math.max(lo, c2 / v);
+      else hi = Math.min(hi, c2 / v);
+      return lo < hi ? [lo, hi] : null;
+    };
+    const windows = [];
+    for (const a of fixedBoxes) {
+      for (const b of movingBoxes) {
+        const wx = axisWindow(a.x, a.x + a.w, b.x, b.x + b.w, ux);
+        if (!wx) continue;
+        const wy = axisWindow(a.y, a.y + a.h, b.y, b.y + b.h, uy);
+        if (!wy) continue;
+        const lo = Math.max(wx[0], wy[0]);
+        const hi = Math.min(wx[1], wy[1]);
+        if (lo < hi && hi > 0) windows.push([lo, hi]);
+      }
+    }
+    windows.sort((a, b) => a[0] - b[0]);
+    let delta = 0;
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const [lo, hi] of windows) {
+        if (lo <= delta + 1e-9 && delta < hi - 1e-9) {
+          delta = hi;
+          changed = true;
+        }
+      }
+    }
+    return delta;
   }
 
   /**
