@@ -113,7 +113,7 @@ class IshikawaDiagram {
       //  ペナルティ項では実用的な範囲でこの動きを止められなかった)。
       // 上限を 0.46 に制限することで、背骨付近の充填を優先しつつ
       // カテゴリごとの最適化 (多ペア時の緩和) は維持する。
-      pairTMinSearchRange: [0.28, 0.46],
+      pairTMinSearchRange: [0.16, 0.30],
       // 片側配置 (フォールバック) 用 t 範囲
       singleTMin: 0.18,
       singleTMax: 0.84,
@@ -418,8 +418,8 @@ class IshikawaDiagram {
       const outerNeed = anyOuterSub ? sideNeed : 0;
       const innerNeed = anyInnerSub ? sideNeed : 0;
       const verticalNeedBetweenCauses = Math.max(
-        60,
-        outerNeed + innerNeed + 36 + causeLabelExtraH,
+        55,
+        outerNeed + innerNeed + 22 + causeLabelExtraH,
       );
 
       // 両側配置: 中骨は「同じ親骨 (大骨) 上で左右交互のサイクル」で
@@ -433,12 +433,16 @@ class IshikawaDiagram {
           + (m.hasDetails ? p.detailLength + m.maxDetailLabel + 16 : 0),
         m.causeLabelW + 12,
       );
-      // 内側 (右、奇数番目) 原因ごとの必要長 (ペア k 番目に属する)
+      // 内側 (右、奇数番目) 原因ごとの必要長 (ペア k 番目に属する)。
+      // ownLen は「最低限これだけあれば小骨ラベルが破綻しない」目安であり、
+      // 実行時キャップ (causeLen = max(80, min(causeLength, maxInner))) が
+      // 別途安全弁として働くため、ここでは緩めの係数をかけて
+      // 大骨長の過大な事前確保を避ける (スカスカ防止)。
       const innerNeedByPairIndex = [];
       causeMetrics.forEach((m, i) => {
         if (i % 2 !== 1) return;
         const k = Math.floor(i / 2);
-        const ownLen = Math.max(90, m.numSub > 0 ? m.subMinLen + 20 : 0);
+        const ownLen = Math.max(70, m.numSub > 0 ? m.subMinLen * 0.92 : 0);
         const need = ownLen + tipExtrasOf(m) + p.innerSafeMargin;
         innerNeedByPairIndex[k] = Math.max(innerNeedByPairIndex[k] || 0, need);
       });
