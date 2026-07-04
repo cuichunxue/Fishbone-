@@ -429,19 +429,44 @@ class IshikawaDiagram {
           + (m.hasDetails ? p.detailLength + m.maxDetailLabel + 16 : 0),
         m.causeLabelW + 12,
       );
-      // 内側 (右、奇数番目) 原因ごとの必要長 (ペア k 番目に属する)。
-      // ownLen は「最低限これだけあれば小骨ラベルが破綻しない」目安であり、
-      // 実行時キャップ (causeLen = max(80, min(causeLength, maxInner))) が
-      // 別途安全弁として働くため、ここでは緩めの係数をかけて
-      // 大骨長の過大な事前確保を避ける (スカスカ防止)。
-      const innerNeedByPairIndex = [];
-      causeMetrics.forEach((m, i) => {
-        if (i % 2 !== 1) return;
-        const k = Math.floor(i / 2);
+      // 内側 (背骨側) 原因の必要長。ownLen は「最低限これだけあれば
+      // 小骨ラベルが破綻しない」目安であり、実行時キャップ
+      // (causeLen = max(80, min(causeLength, maxInner))) が別途安全弁
+      // として働くため、ここでは緩めの係数をかけて大骨長の過大な
+      // 事前確保を避ける (スカスカ防止)。
+      const innerNeedOf = m => {
         const ownLen = Math.max(70, m.numSub > 0 ? m.subMinLen * 0.92 : 0);
-        const need = ownLen + tipExtrasOf(m) + p.innerSafeMargin;
-        innerNeedByPairIndex[k] = Math.max(innerNeedByPairIndex[k] || 0, need);
-      });
+        return ownLen + tipExtrasOf(m) + p.innerSafeMargin;
+      };
+      // どの原因をどのペア・どちら側にするかは、内容量 (内側にしたときの
+      // 必要長) の昇順で決める。L,R,L,R... という交互サイクルは大骨上の
+      // "位置" の順序であり、その位置をどの原因が占めるかは自由に選べる。
+      // 軽い原因同士を背骨に一番近いペアにまとめ、ペア内では軽い方を
+      // 内側にすることで、たまたま隣接する原因が両方重い場合でも
+      // 背骨付近のペアだけは軽く保たれ、大骨全体が不必要に間延びしない
+      // (重い原因は背骨から遠い — 元々余地の大きいペアに割り当てられる)。
+      const orderByNeed = causeMetrics
+        .map((m, i) => ({ i, need: innerNeedOf(m) }))
+        .sort((a, b) => a.need - b.need)
+        .map(o => o.i);
+
+      const sideOfIndex = [];
+      const pairSlotOfIndex = [];
+      const innerNeedByPairIndex = [];
+      for (let k = 0; k < numPairs; k++) {
+        const a = orderByNeed[2 * k];
+        const b = orderByNeed[2 * k + 1];
+        pairSlotOfIndex[a] = k;
+        if (b !== undefined) {
+          pairSlotOfIndex[b] = k;
+          // orderByNeed は昇順なので a の方が必要長が小さい (= 内側向き)
+          sideOfIndex[a] = 'right';
+          sideOfIndex[b] = 'left';
+          innerNeedByPairIndex[k] = innerNeedOf(causeMetrics[a]);
+        } else {
+          sideOfIndex[a] = 'left'; // 相方のいない単独中骨は常に外側
+        }
+      }
 
       // 最後のペアが pairTMax を超えず、かつカテゴリボックスまでの
       // 絶対距離 (px) が pairBoxClearance 以上になる最小の大骨長 L を
@@ -500,6 +525,8 @@ class IshikawaDiagram {
         majorBySingleSide,
         verticalNeedBetweenCauses,
         innerNeedByPairIndex,
+        sideOfIndex,
+        pairSlotOfIndex,
         // 以降は最終 globalL 決定後に再計算
         majorBoneLength: 0,
         majorHorizontal: 0,
@@ -697,11 +724,14 @@ class IshikawaDiagram {
         numPairs, info.majorBoneLength, info.verticalNeedBetweenCauses,
         info.innerNeedByPairIndex, sinA, cosA,
       );
-      causePlacements = info.category.causes.map((_, i) => ({
-        t: pairTs[Math.floor(i / 2)]
-          + ((i % 2 === 0) ? -p.pairStaggerT : +p.pairStaggerT),
-        side: (i % 2 === 0) ? 'left' : 'right',
-      }));
+      causePlacements = info.category.causes.map((_, i) => {
+        const side = info.sideOfIndex[i];
+        const k = info.pairSlotOfIndex[i];
+        return {
+          t: pairTs[k] + (side === 'left' ? -p.pairStaggerT : +p.pairStaggerT),
+          side,
+        };
+      });
     } else {
       const ts = this.computeEvenT(numCauses, p.singleTMin, p.singleTMax);
       causePlacements = info.category.causes.map((_, i) => ({
