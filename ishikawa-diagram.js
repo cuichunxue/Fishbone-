@@ -150,8 +150,13 @@ class IshikawaDiagram {
       },
       horizontalMargin: 48,
       verticalMargin: 40,
-      maxAspectPadding: 96,         // アスペクト比補正で追加してよい余白の上限 (px)
+      maxAspectPadding: 96,         // アスペクト比補正 (下限) で追加してよい余白の上限 (px)
       maxAspectPaddingRatio: 0.06,  // 同、キャンバス幅に対する比率上限
+      // アスペクト比補正 (上限、扁平すぎる図の是正) で追加してよい
+      // 縦余白の上限。中骨を背骨へ寄せた分の高さ縮小を補うため、
+      // 横方向の補正より大きめの余地を持たせる。
+      maxAspectVerticalPadding: 640,
+      maxAspectVerticalPaddingRatio: 0.9,
       causeLabelGap: 18,
       subcauseLabelGap: 12,
       detailLabelGap: 6,
@@ -522,8 +527,8 @@ class IshikawaDiagram {
       halfHeightTopRaw, halfHeightBotRaw * 0.4, p.minCanvasHeight / 2);
     const halfBot = Math.max(
       halfHeightBotRaw, halfHeightTopRaw * 0.4, p.minCanvasHeight / 2);
-    const svgHeight = halfTop + halfBot;
-    const spineY = halfTop;
+    let svgHeight = halfTop + halfBot;
+    let spineY = halfTop;
 
     // カテゴリを「列 (ペア)」単位で配置する。入力データは 4M の慣習で
     // 上下交互 (idx%2 で isTop 判定) に並ぶため、連続する 2 件
@@ -580,6 +585,23 @@ class IshikawaDiagram {
       effectXFinal += shift;
       categoryInfos.forEach(c => { c.spineX += shift; });
       svgWidth += shift * 2;
+    }
+
+    // 上限側の補正: 列数が少ないのに極端に扁平 (横長) になる図は
+    // バランスが悪く見える。中骨を背骨へ寄せた分だけ高さが縮むため、
+    // 幅に対して薄すぎる場合は上下へ均等に余白を足して戻す
+    // (中骨位置・骨長には触れない — 純粋にキャンバスの外側だけを広げる)。
+    // 列数が多いほど図が横長になるのは構造上自然なため、補正量には
+    // 上限を設け、多カテゴリ図まで無理に正方形へ寄せない。
+    const preferredAspectMax = 1.85;
+    if (svgWidth / svgHeight > preferredAspectMax) {
+      const targetHeight = svgWidth / preferredAspectMax;
+      const maxVPadding = Math.min(p.maxAspectVerticalPadding, svgHeight * p.maxAspectVerticalPaddingRatio);
+      const padTotal = Math.min(targetHeight - svgHeight, maxVPadding);
+      if (padTotal > 0) {
+        spineY += padTotal / 2;
+        svgHeight += padTotal;
+      }
     }
 
     // 各カテゴリの大骨と原因の座標を計算 (シフト後の spineX を反映)
