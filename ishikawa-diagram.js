@@ -138,7 +138,7 @@ class IshikawaDiagram {
       innerReserveRelax: 0.9,
       categoryEndClearanceMin: 112, // 最後の中骨〜カテゴリボックスの最小余白
       // 最小描画範囲 (空きカテゴリでも視覚を保つ)
-      minCanvasHeight: 520,
+      minCanvasHeight: 420,
 
       // 相対可読性: 専用ソフト並みにキャンバスに対して文字を大きく
       fontPx: {
@@ -152,11 +152,6 @@ class IshikawaDiagram {
       verticalMargin: 40,
       maxAspectPadding: 96,         // アスペクト比補正 (下限) で追加してよい余白の上限 (px)
       maxAspectPaddingRatio: 0.06,  // 同、キャンバス幅に対する比率上限
-      // アスペクト比補正 (上限、扁平すぎる図の是正) で追加してよい
-      // 縦余白の上限。中骨を背骨へ寄せた分の高さ縮小を補うため、
-      // 横方向の補正より大きめの余地を持たせる。
-      maxAspectVerticalPadding: 640,
-      maxAspectVerticalPaddingRatio: 0.9,
       causeLabelGap: 18,
       subcauseLabelGap: 12,
       detailLabelGap: 6,
@@ -523,10 +518,25 @@ class IshikawaDiagram {
     // 40% は確保する (ソフト対称性)。
     const halfHeightTopRaw = Math.max(maxVerticalTop + p.verticalMargin, minHalfForEffect);
     const halfHeightBotRaw = Math.max(maxVerticalBot + p.verticalMargin, minHalfForEffect);
-    const halfTop = Math.max(
-      halfHeightTopRaw, halfHeightBotRaw * 0.4, p.minCanvasHeight / 2);
-    const halfBot = Math.max(
-      halfHeightBotRaw, halfHeightTopRaw * 0.4, p.minCanvasHeight / 2);
+    // ソフト対称は「両側にカテゴリがある」図にのみ適用する。片側にしか
+    // カテゴリが無い図 (1 カテゴリ等) に適用すると、空いている側に
+    // 重い側の 40% の死んだ余白帯ができ、上下の余白が大きく偏る
+    // (実測: 17-single-rich で上 54px / 下 227px)。
+    let halfTop = topInfos.length
+      ? Math.max(halfHeightTopRaw, botInfos.length ? halfHeightBotRaw * 0.4 : 0)
+      : halfHeightTopRaw;
+    let halfBot = botInfos.length
+      ? Math.max(halfHeightBotRaw, topInfos.length ? halfHeightTopRaw * 0.4 : 0)
+      : halfHeightBotRaw;
+    // 最小キャンバス高さは「合計」に対する下限として、不足分を上下へ
+    // 均等に配分する。各半分へ個別に下限をかけると、片側だけに
+    // カテゴリがある図 (1 カテゴリ等) で空いている側にだけ死んだ余白帯が
+    // でき、上下の余白が大きく偏る (実測: 09-single で上 87px / 下 230px)。
+    const heightShortfall = p.minCanvasHeight - (halfTop + halfBot);
+    if (heightShortfall > 0) {
+      halfTop += heightShortfall / 2;
+      halfBot += heightShortfall / 2;
+    }
     let svgHeight = halfTop + halfBot;
     let spineY = halfTop;
 
@@ -587,22 +597,13 @@ class IshikawaDiagram {
       svgWidth += shift * 2;
     }
 
-    // 上限側の補正: 列数が少ないのに極端に扁平 (横長) になる図は
-    // バランスが悪く見える。中骨を背骨へ寄せた分だけ高さが縮むため、
-    // 幅に対して薄すぎる場合は上下へ均等に余白を足して戻す
-    // (中骨位置・骨長には触れない — 純粋にキャンバスの外側だけを広げる)。
-    // 列数が多いほど図が横長になるのは構造上自然なため、補正量には
-    // 上限を設け、多カテゴリ図まで無理に正方形へ寄せない。
-    const preferredAspectMax = 1.85;
-    if (svgWidth / svgHeight > preferredAspectMax) {
-      const targetHeight = svgWidth / preferredAspectMax;
-      const maxVPadding = Math.min(p.maxAspectVerticalPadding, svgHeight * p.maxAspectVerticalPaddingRatio);
-      const padTotal = Math.min(targetHeight - svgHeight, maxVPadding);
-      if (padTotal > 0) {
-        spineY += padTotal / 2;
-        svgHeight += padTotal;
-      }
-    }
+    // 上限側 (扁平すぎる図) の補正は行わない。
+    // 縦に余白を足してもアスペクト比の「数値」が変わるだけで、実際には
+    // 上下に中身のない空白帯ができ、空白率 (canvasWaste) はかえって悪化する
+    // (実測: 06-6M-stress で 0.21 → 0.55)。カテゴリ数が多い図が横長に
+    // なるのは構造上自然であり、内容密着 (14.1 節) を優先する。
+    // バランスの評価軸はアスペクト比の数値ではなく空白率・余白の対称性
+    // とする (audit-balance.js で測定)。
 
     // 各カテゴリの大骨と原因の座標を計算 (シフト後の spineX を反映)
     categoryInfos.forEach(info => {
