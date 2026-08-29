@@ -15,6 +15,12 @@
  *   fillTop/Bot   : 背骨より上/下の内容が、その側のキャンバス高さを
  *                   どれだけ使っているか (0..1)。上下の偏り検出用
  *   sideBalance   : min(fillTop, fillBot) / max(...) (1 = 上下均等)
+ *   densityBalance: 背骨の上下の「内容量」(ラベル面積) の比 (1 = 均等)
+ *                   sideBalance は広がりを測るため、骨長統一により空の骨
+ *                   だけが伸びている側があっても 1.00 になる。密度はその
+ *                   違いを捉える。値が低い図は入力データ自体が非対称
+ *                   (片側に原因が偏っている) ことを示すので、合否判定
+ *                   ではなく参考情報として出力する。
  *
  * 使い方: node audit-balance.js [パターン名フィルタ]
  */
@@ -63,6 +69,7 @@ async function measure(page) {
     // 列数 (上下ペアで 1 列を共有するため) — 図の横長さは列数で決まる
     const numColumns = Math.max(numTop, numBot);
     let topMinY = Infinity, botMaxY = -Infinity;
+    let inkTopArea = 0, inkBotArea = 0;
 
     for (const el of els) {
       let bb;
@@ -88,6 +95,16 @@ async function measure(page) {
       contentArea += bb.width * bb.height;
       if (y1 < spineY) { if (y0 < topMinY) topMinY = y0; }
       if (y0 > spineY) { if (y1 > botMaxY) botMaxY = y1; }
+      // 「内容量」はラベル (text) の面積で測る。
+      // 骨線を含めると、60° の斜め線の外接矩形面積 (≈0.43×長さ²) が
+      // ラベル 1 個の 10 倍以上を占めるため、「内容の多さ」ではなく
+      // 「斜め線の本数」を測る指標になってしまう。ラベルは内容そのもの
+      // であり視覚的な重みも担うので、これを内容量の代理量とする。
+      // 骨長統一で伸びただけの空の骨はラベルを持たず加算されない。
+      if (el.tagName === 'text') {
+        if (y1 < spineY) inkTopArea += bb.width * bb.height;
+        else if (y0 > spineY) inkBotArea += bb.width * bb.height;
+      }
     }
     if (!isFinite(minX)) return { error: 'no elements' };
 
@@ -114,6 +131,11 @@ async function measure(page) {
       marginSkewY: skew(marginT, marginB),
       fillTop, fillBot,
       numTop, numBot, numColumns,
+      // 密度バランス: 背骨の上下で「実際の内容量」がどれだけ均衡しているか。
+      // sideBalance (広がりの比) が 1.00 でも、骨長統一によって空の骨だけが
+      // 伸びている側があると密度は大きく偏る。その差を可視化する。
+      densityBalance: (numTop > 0 && numBot > 0 && Math.max(inkTopArea, inkBotArea) > 0)
+        ? Math.min(inkTopArea, inkBotArea) / Math.max(inkTopArea, inkBotArea) : 1,
       // 上下密度差は「両側にカテゴリがある」図でのみ意味を持つ
       // (片側のみの図は構造上 0 になるのが正しい)
       sideBalance: (numTop > 0 && numBot > 0 && Math.max(fillTop, fillBot) > 0)
@@ -192,6 +214,7 @@ const CRITERIA = {
       `mT/B=${String(m.marginT|0).padStart(4)}/${String(m.marginB|0).padEnd(4)} ` +
       `skewX=${m.marginSkewX.toFixed(2)} skewY=${m.marginSkewY.toFixed(2)} ` +
       `bal=${m.sideBalance.toFixed(2)} ` +
+      `dens=${m.densityBalance.toFixed(2)} ` +
       (flags.length ? '⚠ ' + flags.join(',') : 'OK')
     );
   }
@@ -208,6 +231,12 @@ const CRITERIA = {
   console.log('平均 marginSkewX  :', avg('marginSkewX').toFixed(3));
   console.log('平均 marginSkewY  :', avg('marginSkewY').toFixed(3));
   console.log('平均 sideBalance  :', avg('sideBalance').toFixed(3));
+  console.log('平均 densityBalance:', avg('densityBalance').toFixed(3));
+  const lowDens = rows.filter(r => r.densityBalance < 0.35);
+  if (lowDens.length) {
+    console.log('密度が偏る図 (参考、0.35 未満):',
+      lowDens.map(r => `${r.name}=${r.densityBalance.toFixed(2)}`).join(', '));
+  }
   console.log('指摘ありパターン  :', flagged.length + '/' + n);
   const byFlag = {};
   flagged.forEach(r => r.flags.forEach(f => { byFlag[f] = (byFlag[f] || 0) + 1; }));
