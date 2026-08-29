@@ -17,10 +17,13 @@ const fs = require('fs');
 const { chromium } = require('/opt/node22/lib/node_modules/playwright');
 
 const ROOT = __dirname;
-const OUT_DIR = path.join(ROOT, 'screenshots');
+// 出力先は OUT_SUBDIR で切り替えられる (テーマ別検証で回帰用の
+// スクリーンショットを上書きしないため)
+const OUT_DIR = path.join(ROOT, 'screenshots',
+  process.env.OUT_SUBDIR || '');
 if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true });
 
-const DATASETS = {
+const BUILTIN_DATASETS = {
   // index.html のテキストエリア初期値 (loadSample() と同一データに統一済み)
   '01-default': null,
 
@@ -1800,6 +1803,12 @@ const DATASETS = {
     cause "環境D"
     cause "環境E"`,
 };
+
+// DATASET_FILE を指定すると、そのファイルのデータセットで検証する
+// (テーマ別検証など。未指定なら組み込みの回帰用 62 パターン)
+const DATASETS = process.env.DATASET_FILE
+  ? require(path.join(ROOT, process.env.DATASET_FILE))
+  : BUILTIN_DATASETS;
 
 async function runChecks(page) {
   return await page.evaluate(() => {

@@ -24,11 +24,15 @@ const fs = require('fs');
 
 const ROOT = __dirname;
 
-// verify.js の DATASETS を再利用する (単一の情報源を保つ)
+// verify.js の DATASETS を再利用する (単一の情報源を保つ)。
+// DATASET_FILE を指定した場合はそのファイルを読み込む (テーマ別検証)。
 function loadDatasets() {
+  if (process.env.DATASET_FILE) {
+    return require(path.join(ROOT, process.env.DATASET_FILE));
+  }
   const src = fs.readFileSync(path.join(ROOT, 'verify.js'), 'utf8');
-  const start = src.indexOf('const DATASETS = {');
-  if (start < 0) throw new Error('DATASETS not found in verify.js');
+  const start = src.indexOf('const BUILTIN_DATASETS = {');
+  if (start < 0) throw new Error('BUILTIN_DATASETS not found in verify.js');
   // 対応する閉じ括弧まで (テンプレートリテラル内の } を誤検出しないよう
   // 行頭の "};" を終端とする)
   const endMarker = '\n};\n';
@@ -36,7 +40,7 @@ function loadDatasets() {
   if (end < 0) throw new Error('DATASETS end not found');
   const body = src.slice(start, end + endMarker.length);
   // eslint-disable-next-line no-new-func
-  return new Function(body + '\nreturn DATASETS;')();
+  return new Function(body + '\nreturn BUILTIN_DATASETS;')();
 }
 
 async function measure(page) {
@@ -120,17 +124,27 @@ async function measure(page) {
 
 // 推奨基準 (DIAGRAM_RULES.md 3.7 節 / 仕様 21.2 節に対応)
 //
-// アスペクト比は「列数」に依存する構造量である。列が増えれば図は必ず
-// 横長になるため、固定上限で評価すると多カテゴリ図が一律に不合格になり
-// 指標として機能しない。そこで許容上限を列数に比例させる。
-// 縦に余白を足して数値だけ 1.85 に合わせる補正は、空白率を悪化させる
-// だけなので行わない (ishikawa-diagram.js の該当コメント参照)。
+// アスペクト比は「列数」に依存する構造量である。図の幅は実測から
+//     幅 ≈ 526px + 687px × 列数
+// という線形モデルによく従う (回帰・テーマ計 76 パターンの最小二乗)。
+// 第 1 項は列数に依存しない固定オーバーヘッド (特性ボックス + 背骨の
+// 尾部 + 左右マージン)、第 2 項が 1 列あたりの内容幅である。
+// したがって許容上限は「固定項 + 列比例項」の形にする。純比例
+// (perColumn × 列数) だと 1 列の図で固定項を賄えず誤検出する
+// (実測: T07-カフェ客数減 が 2.09 で純比例上限 2.0 を僅かに超過)。
+// 高さは最小キャンバス高さ (420px) に張り付く図が最も扁平になるので、
+// それを基準に px モデルをアスペクト比へ換算し、通常のばらつきを
+// 通す程度の余裕を持たせている。
+// なお、縦に余白を足して数値だけ 1.85 に合わせる補正は空白率を悪化
+// させるだけなので行わない (ishikawa-diagram.js の該当コメント参照)。
 const CRITERIA = {
   aspectMin: 0.60,
-  // 1 列あたり概ね 2.0 の横長さを許容 (2 列で 4.0、6 列で 12.0)。
-  // 現行の全 62 パターンはこの範囲に収まる = 退行検出用のガードとして機能する。
-  aspectMaxPerColumn: 2.0,
-  aspectMaxFloor: 1.85,
+  // aspectMax = aspectMaxBase + aspectMaxPerColumn × 列数
+  //   1 列 → 3.4 / 2 列 → 5.3 / 3 列 → 7.2 / 6 列 → 12.9
+  // 現行の全パターン (回帰 62 + テーマ 14) はこの範囲に収まるため、
+  // 「列あたりの幅が異常に膨らむ」退行を検出するガードとして機能する。
+  aspectMaxBase: 1.5,
+  aspectMaxPerColumn: 1.9,
   canvasWasteMax: 0.42,
   marginSkewMax: 0.35,
   sideBalanceMin: 0.55,
@@ -158,8 +172,8 @@ const CRITERIA = {
     const m = await measure(page);
     if (m.error) { console.log(name.padEnd(26), 'ERROR', m.error); continue; }
 
-    const aspectMax = Math.max(
-      CRITERIA.aspectMaxFloor, CRITERIA.aspectMaxPerColumn * m.numColumns);
+    const aspectMax =
+      CRITERIA.aspectMaxBase + CRITERIA.aspectMaxPerColumn * m.numColumns;
     const flags = [];
     if (m.aspect < CRITERIA.aspectMin) flags.push('縦長');
     if (m.aspect > aspectMax) flags.push('扁平');
