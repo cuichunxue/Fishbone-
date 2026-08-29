@@ -125,6 +125,11 @@ class IshikawaDiagram {
       // 最小分離距離 (px)。全要素の外接矩形がこの距離以上離れるよう、
       // スロット間隔・大骨長が数学的に確定する (唯一の美観ノブ)。
       gapPaddingPx: 12,
+      // 重要要因の赤楕円がラベル外接領域を左右へ広げる量 (合計 px)。
+      // createImportanceEllipse の rx = w/2 + 14 と対応 (14 x 2 = 28)。
+      // 間隔計算をラベル幅だけで行うと重要マーク同士が重なるため、
+      // ラベル幅にこの分を上乗せして扱う。
+      importanceExtraX: 28,
       // 内側 (背骨側) 中骨の内容が「大骨の背骨接続点 X」を右へ越えて
       // よい距離 (px)。背骨は水平線であり、接続点の右側 (隣の列との間)
       // は実際には空き空間のため、ここを使うことで中骨を背骨へ大きく
@@ -263,8 +268,14 @@ class IshikawaDiagram {
         const causeLabelW = causeLabelM.width + 20;
         const numSub = cause.subcauses.length;
 
-        const subLabelMs = cause.subcauses.map(s =>
-          this.wrappedLabelMetrics(s.name, p.fontPx.subcause, p.labelWrapWidth.subcause));
+        // 重要要因は赤楕円で囲まれ、ラベルより左右へ各
+        // importanceExtraX/2 だけ広がる。間隔計算はこの外接領域で
+        // 行わないと、重要マーク付きの小骨同士が重なる
+        // (実測: 全ラベルを重要指定した X03 で -5.9px の重なり)。
+        const subLabelMs = cause.subcauses.map(s => {
+          const m = this.wrappedLabelMetrics(s.name, p.fontPx.subcause, p.labelWrapWidth.subcause);
+          return { ...m, width: m.width + (s.important ? p.importanceExtraX : 0) };
+        });
         const maxSubLabel = numSub > 0 ? Math.max(...subLabelMs.map(m => m.width)) : 0;
         const maxSubLabelLines = numSub > 0 ? Math.max(...subLabelMs.map(m => m.lineCount)) : 1;
 
@@ -281,7 +292,11 @@ class IshikawaDiagram {
         // 配置するのに必要な長さを実測ベースで見込む (9.3 節)。
         // detailTipClear は小骨の自由端 (小骨ラベルの位置) との干渉を
         // 避けるための終端余白。
-        const detailTipClear = 32;
+        // 小骨の自由端には小骨自身のラベルが置かれる。そのラベルが
+        // 重要要因なら赤楕円ぶん (片側 importanceExtraX/2) だけ孫骨側へ
+        // 張り出すため、終端余白に上乗せする。
+        const detailTipClearOf = sc =>
+          32 + (sc.important ? p.importanceExtraX / 2 : 0);
         const subLensPerSub = cause.subcauses.map(s => {
           const n = s.details.length;
           if (n === 0) return p.subcauseBaseLength;
@@ -289,7 +304,7 @@ class IshikawaDiagram {
             typeof d === 'string' ? d : d.name, p.fontPx.detail, p.labelWrapWidth.detail));
           const dMaxLabel = Math.max(...dLabelMs.map(m => m.width));
           const dStep = dMaxLabel + p.detailLabelGap * 2 + 14;
-          const detailSpan = p.firstDetailGap + (n - 1) * dStep + detailTipClear;
+          const detailSpan = p.firstDetailGap + (n - 1) * dStep + detailTipClearOf(s);
           return Math.max(p.subcauseBaseLength, detailSpan);
         });
         const subOwnLen = subLensPerSub.length
@@ -889,9 +904,13 @@ class IshikawaDiagram {
     // firstDetailGap (既定 32px) を基準に開始し、実際に必要な間隔だけ
     // 自由端方向へ詰めて展開する (t 比率は使わない)。詳細が少ない小骨は
     // 付け根付近にまとまり、多い小骨だけが自由端側へ伸びる。
-    const detailLabelMs = sub.details.map(d =>
-      this.wrappedLabelMetrics(
-        typeof d === 'string' ? d : d.name, p.fontPx.detail, p.labelWrapWidth.detail));
+    // 小骨と同様、重要要因の赤楕円ぶんの広がりを間隔計算へ含める
+    const detailLabelMs = sub.details.map(d => {
+      const m = this.wrappedLabelMetrics(
+        typeof d === 'string' ? d : d.name, p.fontPx.detail, p.labelWrapWidth.detail);
+      const important = typeof d !== 'string' && d.important;
+      return { ...m, width: m.width + (important ? p.importanceExtraX : 0) };
+    });
     const maxDetailLabelHere = detailLabelMs.length
       ? Math.max(...detailLabelMs.map(m => m.width))
       : 0;
@@ -900,7 +919,8 @@ class IshikawaDiagram {
     // 最後の孫骨がそこへ近づきすぎないようにする (Phase 1 の
     // detailTipClear と対応)
     const distances = this.computeAnchoredPackedDistances(
-      sub.details.length, p.firstDetailGap, stepPx, ctx.subLen, 32,
+      sub.details.length, p.firstDetailGap, stepPx, ctx.subLen,
+      32 + (sub.important ? p.importanceExtraX / 2 : 0),
     );
     const parentDir = ctx.horizontalDir;
     const hasBoneRef = ctx.boneStartX !== undefined && ctx.boneEndX !== undefined;
@@ -1257,6 +1277,7 @@ class IshikawaDiagram {
    * ラベルブロック (+ 重要マーク楕円) の外接矩形を返す。
    */
   labelBlockBBox(x, y, lines, fontSize, anchor, stackDir, important = false) {
+    const p = this.params;
     const lineH = fontSize + 3;
     const n = lines.length;
     let y0;
@@ -1274,7 +1295,7 @@ class IshikawaDiagram {
     if (important) {
       const cx = anchor === 'end' ? x - w / 2 : anchor === 'start' ? x + w / 2 : x;
       const cy = y0 + ((n - 1) * lineH) / 2;
-      const rx = w / 2 + 14;
+      const rx = w / 2 + p.importanceExtraX / 2;
       const ry = h / 2 + 9;
       const ex0 = Math.min(box.x, cx - rx);
       const ey0 = Math.min(box.y, cy - ry);
@@ -1775,6 +1796,7 @@ class IshikawaDiagram {
    * createWrappedText と同じ配置ロジックでラベルブロックを囲む楕円を作る
    */
   createImportanceEllipse(x, y, lines, fontSize, textAnchor, stackDir = 0) {
+    const p = this.params;
     const lineH = fontSize + 3;
     const n = lines.length;
     let y0;
@@ -1791,7 +1813,9 @@ class IshikawaDiagram {
     const ellipse = document.createElementNS('http://www.w3.org/2000/svg', 'ellipse');
     ellipse.setAttribute('cx', cx);
     ellipse.setAttribute('cy', cy);
-    ellipse.setAttribute('rx', w / 2 + 14);
+    // rx の +14 は左右で計 28px。間隔計算側 (params.importanceExtraX)
+    // と対応させること — 片方だけ変えるとラベルが重なる
+    ellipse.setAttribute('rx', w / 2 + p.importanceExtraX / 2);
     ellipse.setAttribute('ry', blockH / 2 + 9);
     ellipse.setAttribute('fill', 'none');
     ellipse.setAttribute('stroke', '#d63031');
