@@ -469,3 +469,58 @@ button {
 ::-webkit-scrollbar-thumb:hover {
   background: #555;
 }
+
+/* ===== 作図上の助言 (notice) =====
+   上限超過による省略・要因の重複・カテゴリへの偏りなど、特性要因図の
+   定石から外れている点を利用者へ知らせる。描画自体は妨げない。 */
+#noticeArea {
+  width: 100%;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#noticeArea:not(:empty) {
+  margin-bottom: 16px;
+}
+
+.notice {
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.6;
+  border-left: 4px solid;
+}
+
+.notice-warn {
+  background: #fff4f2;
+  border-color: #c0392b;
+  color: #7b241c;
+}
+
+.notice-info {
+  background: #f2f7fc;
+  border-color: #2f6fb3;
+  color: #1f4e79;
+}
+
+.notice-detail {
+  margin-top: 4px;
+  opacity: 0.9;
+}
+
+.notice details {
+  margin-top: 6px;
+}
+
+.notice summary {
+  cursor: pointer;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.notice ul {
+  margin: 6px 0 0 18px;
+  font-size: 12px;
+}

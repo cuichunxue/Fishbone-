@@ -129,6 +129,8 @@
 
       <!-- 右側パネル：ダイアグラム表示エリア -->
       <div class="display-panel">
+        <!-- 作図上の助言 (上限超過・重複要因・偏り等)。描画は妨げない -->
+        <div id="noticeArea"></div>
         <div id="diagramContainer">
           <div class="empty-state">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -166,6 +168,30 @@
     });
 
     // ダイアグラムを生成
+    /**
+     * パーサが返した作図上の助言を表示する。
+     * warn = 情報が失われている (上限超過による省略) ため必ず気づかせる。
+     * info = 読みやすさ・網羅性に関する助言。
+     */
+    function renderNotices(notices) {
+      const area = document.getElementById('noticeArea');
+      if (!area) return;
+      if (!notices || !notices.length) { area.innerHTML = ''; return; }
+      const esc = s => String(s).replace(/[&<>"]/g,
+        c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+      area.innerHTML = notices.map(n => {
+        const warn = n.level === 'warn';
+        const items = (n.items && n.items.length)
+          ? `<details><summary>該当 ${n.items.length} 件を表示</summary><ul>`
+            + n.items.map(i => `<li>${esc(i)}</li>`).join('') + '</ul></details>'
+          : '';
+        return `<div class="notice ${warn ? 'notice-warn' : 'notice-info'}">
+          <strong>${warn ? '⚠' : 'ヒント'} ${esc(n.title)}</strong>
+          <div class="notice-detail">${esc(n.detail)}</div>${items}
+        </div>`;
+      }).join('');
+    }
+
     function generateDiagram() {
       const mermaidText = document.getElementById('mermaidInput').value;
 
@@ -177,6 +203,9 @@
       try {
         // パース
         const data = parser.parse(mermaidText);
+
+        // 作図上の助言を提示 (描画は妨げない)
+        renderNotices(data.notices);
 
         // 描画
         diagram.render(data);
