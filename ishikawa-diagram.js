@@ -681,7 +681,15 @@ class IshikawaDiagram {
         //  実張り出しは列パッキングが吸収する)
         const distToSpine = info.spineX - attachX;
         const maxInner = distToSpine + p.innerOverhangPx - ownTipExtras;
-        causeLen = Math.max(80, Math.min(cm.causeLength, maxInner));
+        // ただし「小骨の配置に必要な長さ」(subSpanPx) より短くはしない。
+        // これを下回ると computeInterleavedDistances が比例圧縮を行い、
+        // 同じ側の隣接小骨のラベル間隔がラベル幅を下回って重なる
+        // (実測: X01-完全飽和 で同側間隔 109px → 84px に潰れて重なり発生)。
+        // 骨の長さは内容が決め、背骨との安全距離は「位置」で吸収する
+        // のが本エンジンの原則であり、不足分は厳密ソルバー
+        // (solveCategoryExactGaps) がスロットを外側へ押して解決する。
+        const contentMin = Math.min(cm.causeLength, cm.subSpanPx || 0);
+        causeLen = Math.max(80, contentMin, Math.min(cm.causeLength, maxInner));
       }
 
       const startX = attachX + direction * causeLen; // 中骨の free end
