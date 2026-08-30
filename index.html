@@ -33,91 +33,39 @@
         detail "予算不足"
       subcause "部品摩耗"
         detail "使用年数長い"
-        detail "交換遅延"
-      subcause "校正不十分"
-        detail "精度低下"
-        detail "基準ズレ"
     cause "温度管理不良"
       subcause "センサー故障"
-        detail "劣化進行"
-        detail "誤作動"
       subcause "空調不備"
-        detail "能力不足"
-      subcause "配置不良"
     cause "振動異常"
-      subcause "基礎不良"
-      subcause "バランス悪化"
-      subcause "設置環境"
-    cause "油圧低下"
-      subcause "漏れ発生"
-      subcause "フィルタ詰まり"
 
   category "人"
     cause "技能不足"
       subcause "研修不足"
         detail "OJT不足"
-        detail "座学少ない"
       subcause "経験浅い"
-        detail "新人多い"
-        detail "ベテラン不足"
-      subcause "資格未取得"
     cause "疲労蓄積"
       subcause "長時間労働"
-        detail "残業過多"
-        detail "休日少ない"
       subcause "休憩不足"
-      subcause "夜勤連続"
     cause "コミュニケーション不足"
-      subcause "情報共有不備"
-      subcause "報連相欠如"
-      subcause "チーム連携弱い"
-    cause "モチベーション低下"
-      subcause "評価不満"
-      subcause "目標不明確"
 
   category "材料"
     cause "品質バラツキ"
       subcause "ロット管理不良"
-        detail "トレース不可"
-        detail "記録漏れ"
       subcause "検査基準甘い"
-        detail "サンプル少ない"
-      subcause "供給元変更"
     cause "保管環境不適切"
-      subcause "温度管理不良"
+      subcause "温度管理"
         detail "冷蔵設備故障"
-        detail "温度記録なし"
-      subcause "湿度管理不良"
-        detail "除湿器故障"
-      subcause "保管期限超過"
+      subcause "湿度管理"
     cause "入荷検査不備"
-      subcause "検査項目不足"
-      subcause "合格基準甘い"
-      subcause "サンプリング不適切"
-    cause "材料変わった"
-      subcause "仕様変更"
-      subcause "代替品使用"
 
   category "方法"
     cause "作業手順不明確"
       subcause "マニュアル古い"
-        detail "更新なし"
-        detail "実態不一致"
-      subcause "手順書なし"
-      subcause "口頭伝承のみ"
+      subcause "更新されていない"
     cause "標準化不足"
       subcause "各自の方法"
         detail "統一性なし"
-        detail "ベテラン依存"
-      subcause "基準未設定"
-      subcause "ルール不徹底"
-    cause "チェック体制不十分"
-      subcause "ダブルチェックなし"
-      subcause "記録不備"
-      subcause "責任者不在"
-    cause "設定値が緩い"
-      subcause "基準甘い"
-      subcause "マージン過多"</textarea>
+    cause "チェック体制不十分"</textarea>
         </div>
 
         <div class="button-group">
@@ -164,11 +112,25 @@
             <strong>subcause</strong>: 副原因（小骨）<br>
             <strong>detail</strong>: 詳細（孫骨）
           </p>
+
+          <h3>重要要因の強調</h3>
+          <p>
+            ラベルの末尾に <strong>!</strong> を付けると、その要因が
+            <span style="color:#d63031; font-weight:bold;">赤い楕円</span>で囲まれます（QC の慣習）。<br>
+            例: <code>cause "技能不足!"</code>
+          </p>
+
+          <h3>エクスポート</h3>
+          <p>
+            PNG は 2 倍解像度で出力されるため、印刷やスライド貼付でも文字が鮮明です。
+          </p>
         </div>
       </div>
 
       <!-- 右側パネル：ダイアグラム表示エリア -->
       <div class="display-panel">
+        <!-- 作図上の助言 (上限超過・重複要因・偏り等)。描画は妨げない -->
+        <div id="noticeArea"></div>
         <div id="diagramContainer">
           <div class="empty-state">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -206,6 +168,30 @@
     });
 
     // ダイアグラムを生成
+    /**
+     * パーサが返した作図上の助言を表示する。
+     * warn = 情報が失われている (上限超過による省略) ため必ず気づかせる。
+     * info = 読みやすさ・網羅性に関する助言。
+     */
+    function renderNotices(notices) {
+      const area = document.getElementById('noticeArea');
+      if (!area) return;
+      if (!notices || !notices.length) { area.innerHTML = ''; return; }
+      const esc = s => String(s).replace(/[&<>"]/g,
+        c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+      area.innerHTML = notices.map(n => {
+        const warn = n.level === 'warn';
+        const items = (n.items && n.items.length)
+          ? `<details><summary>該当 ${n.items.length} 件を表示</summary><ul>`
+            + n.items.map(i => `<li>${esc(i)}</li>`).join('') + '</ul></details>'
+          : '';
+        return `<div class="notice ${warn ? 'notice-warn' : 'notice-info'}">
+          <strong>${warn ? '⚠' : 'ヒント'} ${esc(n.title)}</strong>
+          <div class="notice-detail">${esc(n.detail)}</div>${items}
+        </div>`;
+      }).join('');
+    }
+
     function generateDiagram() {
       const mermaidText = document.getElementById('mermaidInput').value;
 
@@ -217,6 +203,9 @@
       try {
         // パース
         const data = parser.parse(mermaidText);
+
+        // 作図上の助言を提示 (描画は妨げない)
+        renderNotices(data.notices);
 
         // 描画
         diagram.render(data);
